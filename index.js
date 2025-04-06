@@ -1,9 +1,15 @@
-'use strict';
-const http = require('http');
-const port = process.env.PORT || 1337;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Simple Game</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Click the Button Game</h1>
+  <p>Score: <span id="score">0</span></p>
+  <button id="clickMe">Click Me!</button>
 
-http.createServer(function (req, res) {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.write(`Request path: ${req.url}\n`);
-    res.end('Hello World\n');
-}).listen(port);
+  <script src="game.js"></script>
+</body>
+</html>
