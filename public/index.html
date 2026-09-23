@@ -12,6 +12,8 @@
     <p class="subtitle">Habits, journal &amp; goals, all in one place.</p>
   </header>
 
+  <div class="warning-banner" id="warningBanner"></div>
+
   <nav class="tabs" id="tabs">
     <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
     <button class="tab-btn" data-tab="habits">Habits</button>
@@ -22,6 +24,54 @@
   <main>
     <section id="dashboard" class="tab-panel active">
       <div class="card-grid" id="dashboardGrid"></div>
+
+      <section class="activity-section">
+        <h2 class="section-heading">🔥 Streak &amp; Activity</h2>
+        <div class="card-grid" id="streakGrid"></div>
+
+        <div class="heatmap-wrap">
+          <div class="heatmap-row">
+            <div class="heatmap-daylabels">
+              <span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>
+            </div>
+            <div class="heatmap-scroll">
+              <div class="heatmap-months" id="activityMonths"></div>
+              <div class="heatmap" id="activityHeatmap"></div>
+            </div>
+          </div>
+          <div class="heatmap-legend">
+            <span>Less</span>
+            <span class="heat-swatch heat-0"></span>
+            <span class="heat-swatch heat-1"></span>
+            <span class="heat-swatch heat-2"></span>
+            <span class="heat-swatch heat-3"></span>
+            <span class="heat-swatch heat-4"></span>
+            <span>More</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="backup-card" id="backupCard">
+        <div class="backup-info">
+          <div class="backup-title">Backup</div>
+          <div class="backup-status" id="backupStatus"></div>
+        </div>
+        <div class="backup-actions">
+          <button type="button" id="exportBtn">Export backup</button>
+          <label class="file-btn">
+            Import backup
+            <input type="file" id="importFile" accept="application/json">
+          </label>
+        </div>
+      </div>
+
+      <div class="import-confirm" id="importConfirm">
+        <p id="importSummary"></p>
+        <div class="import-confirm-actions">
+          <button type="button" id="importCancelBtn" class="secondary-btn">Cancel</button>
+          <button type="button" id="importConfirmBtn">Replace my data</button>
+        </div>
+      </div>
     </section>
 
     <section id="habits" class="tab-panel">
@@ -34,12 +84,12 @@
 
     <section id="journal" class="tab-panel">
       <form id="journalForm" class="stacked-form">
-        <div class="mood-picker" id="moodPicker">
-          <button type="button" class="mood-btn" data-mood="😄">😄</button>
-          <button type="button" class="mood-btn" data-mood="🙂">🙂</button>
-          <button type="button" class="mood-btn" data-mood="😐">😐</button>
-          <button type="button" class="mood-btn" data-mood="🙁">🙁</button>
-          <button type="button" class="mood-btn" data-mood="😢">😢</button>
+        <div class="mood-picker" id="moodPicker" role="radiogroup" aria-label="Mood">
+          <button type="button" class="mood-btn" data-mood="😄" role="radio" aria-checked="false">😄</button>
+          <button type="button" class="mood-btn selected" data-mood="🙂" role="radio" aria-checked="true">🙂</button>
+          <button type="button" class="mood-btn" data-mood="😐" role="radio" aria-checked="false">😐</button>
+          <button type="button" class="mood-btn" data-mood="🙁" role="radio" aria-checked="false">🙁</button>
+          <button type="button" class="mood-btn" data-mood="😢" role="radio" aria-checked="false">😢</button>
         </div>
         <textarea id="journalInput" placeholder="What's on your mind today?" rows="3" required></textarea>
         <button type="submit">Add Entry</button>
@@ -56,6 +106,11 @@
       <ul class="item-list" id="goalList"></ul>
     </section>
   </main>
+
+  <div class="toast" id="toast">
+    <span class="toast-message"></span>
+    <button type="button" class="toast-undo">Undo</button>
+  </div>
 
   <script src="app.js"></script>
 </body>
