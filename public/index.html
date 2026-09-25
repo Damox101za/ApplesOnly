@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Life Tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>Life Tracker</h1>
+    <p class="subtitle">Habits, journal &amp; goals, all in one place.</p>
+  </header>
+
+  <div class="warning-banner" id="warningBanner"></div>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="habits">Habits</button>
+    <button class="tab-btn" data-tab="journal">Journal</button>
+    <button class="tab-btn" data-tab="goals">Goals</button>
+    <button class="tab-btn" data-tab="tasks">Tasks</button>
+    <button class="tab-btn" data-tab="calendar">Calendar</button>
+  </nav>
+
+  <main>
+    <section id="dashboard" class="tab-panel active">
+      <div class="card-grid" id="dashboardGrid"></div>
+
+      <section class="activity-section">
+        <h2 class="section-heading">🔥 Streak &amp; Activity</h2>
+        <div class="card-grid" id="streakGrid"></div>
+
+        <div class="heatmap-wrap">
+          <div class="heatmap-row">
+            <div class="heatmap-daylabels">
+              <span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>
+            </div>
+            <div class="heatmap-scroll">
+              <div class="heatmap-months" id="activityMonths"></div>
+              <div class="heatmap" id="activityHeatmap"></div>
+            </div>
+          </div>
+          <div class="heatmap-legend">
+            <span>Less</span>
+            <span class="heat-swatch heat-0"></span>
+            <span class="heat-swatch heat-1"></span>
+            <span class="heat-swatch heat-2"></span>
+            <span class="heat-swatch heat-3"></span>
+            <span class="heat-swatch heat-4"></span>
+            <span>More</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="backup-card" id="backupCard">
+        <div class="backup-info">
+          <div class="backup-title">Backup</div>
+          <div class="backup-status" id="backupStatus"></div>
+        </div>
+        <div class="backup-actions">
+          <button type="button" id="exportBtn">Export backup</button>
+          <label class="file-btn">
+            Import backup
+            <input type="file" id="importFile" accept="application/json">
+          </label>
+        </div>
+      </div>
+
+      <div class="import-confirm" id="importConfirm">
+        <p id="importSummary"></p>
+        <div class="import-confirm-actions">
+          <button type="button" id="importCancelBtn" class="secondary-btn">Cancel</button>
+          <button type="button" id="importConfirmBtn">Replace my data</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="habits" class="tab-panel">
+      <form id="habitForm" class="inline-form">
+        <input type="text" id="habitInput" placeholder="New habit, e.g. Drink water" required>
+        <button type="submit">Add Habit</button>
+      </form>
+      <ul class="item-list" id="habitList"></ul>
+    </section>
+
+    <section id="journal" class="tab-panel">
+      <form id="journalForm" class="stacked-form">
+        <div class="mood-picker" id="moodPicker" role="radiogroup" aria-label="Mood">
+          <button type="button" class="mood-btn" data-mood="😄" role="radio" aria-checked="false">😄</button>
+          <button type="button" class="mood-btn selected" data-mood="🙂" role="radio" aria-checked="true">🙂</button>
+          <button type="button" class="mood-btn" data-mood="😐" role="radio" aria-checked="false">😐</button>
+          <button type="button" class="mood-btn" data-mood="🙁" role="radio" aria-checked="false">🙁</button>
+          <button type="button" class="mood-btn" data-mood="😢" role="radio" aria-checked="false">😢</button>
+        </div>
+        <textarea id="journalInput" placeholder="What's on your mind today?" rows="3" required></textarea>
+        <button type="submit">Add Entry</button>
+      </form>
+      <ul class="item-list" id="journalList"></ul>
+    </section>
+
+    <section id="goals" class="tab-panel">
+      <form id="goalForm" class="inline-form">
+        <input type="text" id="goalInput" placeholder="New goal, e.g. Run a 5k" required>
+        <input type="date" id="goalDate">
+        <button type="submit">Add Goal</button>
+      </form>
+      <ul class="item-list" id="goalList"></ul>
+    </section>
+
+    <section id="tasks" class="tab-panel">
+      <div class="google-card" id="googleCard">
+        <div class="google-header">
+          <div>
+            <div class="google-title">Google Calendar</div>
+            <div class="google-status" id="googleStatus">Not connected.</div>
+          </div>
+          <div class="google-actions">
+            <button type="button" id="googleConnectBtn">Connect</button>
+            <button type="button" id="googleSyncBtn" class="secondary-btn" hidden>Sync now</button>
+            <button type="button" id="googleDisconnectBtn" class="secondary-btn" hidden>Disconnect</button>
+          </div>
+        </div>
+        <details class="google-setup">
+          <summary>Google Client ID setup</summary>
+          <p>
+            Tasks with a due date can create matching events on your Google Calendar.
+            You'll need an OAuth Client ID from your own Google Cloud project
+            (it's not a secret — safe to store here). Ask for setup steps if you
+            haven't made one yet.
+          </p>
+          <div class="inline-form">
+            <input type="text" id="googleClientIdInput" placeholder="xxxxx.apps.googleusercontent.com">
+            <button type="button" id="googleClientIdSaveBtn">Save</button>
+          </div>
+        </details>
+      </div>
+
+      <div class="google-card" id="icsCard">
+        <div class="google-header">
+          <div>
+            <div class="google-title">Import / export calendar (.ics)</div>
+            <div class="google-status">Works with any calendar app — Google, Apple, Outlook, or a forwarded invite.</div>
+          </div>
+          <div class="google-actions">
+            <button type="button" id="icsExportBtn" class="secondary-btn">Export .ics</button>
+            <label class="file-btn">
+              Import .ics
+              <input type="file" id="icsImportFile" accept=".ics,text/calendar">
+            </label>
+          </div>
+        </div>
+        <div class="import-confirm" id="icsImportConfirm">
+          <p id="icsImportSummary"></p>
+          <div class="import-confirm-actions">
+            <button type="button" id="icsImportCancelBtn" class="secondary-btn">Cancel</button>
+            <button type="button" id="icsImportConfirmBtn">Add as tasks</button>
+          </div>
+        </div>
+      </div>
+
+      <form id="taskForm" class="inline-form">
+        <input type="text" id="taskInput" placeholder="New task, e.g. Renew passport" required>
+        <input type="date" id="taskDate">
+        <button type="submit">Add Task</button>
+      </form>
+
+      <div class="view-toggle" id="taskViewToggle" role="group" aria-label="Task view">
+        <button type="button" class="view-toggle-btn" data-view="list">List</button>
+        <button type="button" class="view-toggle-btn" data-view="board">Board</button>
+      </div>
+
+      <ul class="item-list" id="taskList"></ul>
+      <div class="board" id="taskBoard" hidden></div>
+    </section>
+
+    <section id="calendar" class="tab-panel">
+      <div class="google-card" id="calendarToolbar">
+        <div class="google-header">
+          <div>
+            <div class="google-title" id="calendarMonthLabel"></div>
+            <div class="google-status">Tasks and goals due this month.</div>
+          </div>
+          <div class="google-actions">
+            <button type="button" id="calendarPrevBtn" class="secondary-btn">‹ Prev</button>
+            <button type="button" id="calendarTodayBtn" class="secondary-btn">Today</button>
+            <button type="button" id="calendarNextBtn" class="secondary-btn">Next ›</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="calendar-daylabels">
+        <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+      </div>
+      <div class="calendar-grid" id="calendarGrid"></div>
+
+      <div class="calendar-day-detail" id="calendarDayDetail" hidden>
+        <h3 id="calendarDayDetailTitle"></h3>
+        <ul class="item-list" id="calendarDayDetailList"></ul>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast">
+    <span class="toast-message"></span>
+    <button type="button" class="toast-undo">Undo</button>
+  </div>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="app.js"></script>
+</body>
+</html>
