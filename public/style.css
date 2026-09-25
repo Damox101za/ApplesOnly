@@ -19,6 +19,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
@@ -622,4 +626,305 @@ button {
 
 .heat-swatch.heat-4 {
   background: var(--heat-4);
+}
+
+/* ---------- Tasks / overdue / sync badge ---------- */
+.item-meta.overdue {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.sync-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+/* ---------- Google Calendar card ---------- */
+.google-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.google-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.google-title {
+  font-weight: 600;
+}
+
+.google-status {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 0.15rem;
+}
+
+.google-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.google-actions button {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.google-actions button.secondary-btn {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.google-actions button.secondary-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.google-setup {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.google-setup summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.google-setup p {
+  margin: 0.5rem 0;
+}
+
+/* ---------- List / Board view toggle ---------- */
+.view-toggle {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.view-toggle-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.view-toggle-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ---------- Kanban board ---------- */
+.board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .board {
+    grid-template-columns: 1fr;
+  }
+}
+
+.board-column {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.board-column.drag-over {
+  border-color: var(--accent);
+  background: #f5f4ff;
+}
+
+.board-column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.board-count {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.05rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.board-card-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-height: 40px;
+}
+
+.board-card {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  cursor: grab;
+}
+
+.board-card.dragging {
+  opacity: 0.5;
+}
+
+.board-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.board-move-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.board-move-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.board-empty {
+  padding: 0.75rem 0;
+  font-size: 0.85rem;
+}
+
+/* ---------- Calendar ---------- */
+.calendar-daylabels {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin: 1rem 0 0.4rem;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.4rem;
+}
+
+.calendar-day {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem;
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.calendar-day.other-month {
+  background: var(--bg);
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.calendar-day.today {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+
+.calendar-day.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.calendar-day.selected .calendar-day-num,
+.calendar-day.selected .calendar-day-preview {
+  color: #fff;
+}
+
+.calendar-day-num {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.calendar-day-badge {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  font-size: 0.7rem;
+}
+
+.calendar-day-badge.overdue {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.calendar-day-preview {
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.calendar-day-detail {
+  margin-top: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.calendar-day-detail h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
 }

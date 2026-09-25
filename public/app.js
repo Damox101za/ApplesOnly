@@ -4,11 +4,17 @@ const STORAGE_KEYS = {
   habits: 'lifeTracker.habits',
   journal: 'lifeTracker.journal',
   goals: 'lifeTracker.goals',
+  tasks: 'lifeTracker.tasks',
   schemaVersion: 'lifeTracker.schemaVersion',
   lastBackupAt: 'lifeTracker.lastBackupAt',
+  googleClientId: 'lifeTracker.googleClientId',
+  lastGoogleSyncAt: 'lifeTracker.lastGoogleSyncAt',
+  taskViewMode: 'lifeTracker.taskViewMode',
 };
 
-const SCHEMA_VERSION = 1;
+const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+
+const SCHEMA_VERSION = 2;
 
 // ---------- Storage helpers ----------
 function safeParse(raw, fallback) {
@@ -85,6 +91,18 @@ const MIGRATIONS = {
     data.goals = (data.goals || []).map(dedupeId);
     return data;
   },
+  2(data) {
+    // Replace the old done boolean with a three-state status so tasks can
+    // live on a kanban board (todo / in_progress / done).
+    data.tasks = (data.tasks || []).map((t) => {
+      if (t.status === undefined) {
+        t.status = t.done ? 'done' : 'todo';
+      }
+      delete t.done;
+      return t;
+    });
+    return data;
+  },
 };
 
 function migrate(data) {
@@ -103,6 +121,7 @@ function loadAndMigrate() {
     habits: load(STORAGE_KEYS.habits, []),
     journal: load(STORAGE_KEYS.journal, []),
     goals: load(STORAGE_KEYS.goals, []),
+    tasks: load(STORAGE_KEYS.tasks, []),
     schemaVersion: storedVersion,
   };
 
@@ -111,13 +130,14 @@ function loadAndMigrate() {
     save(STORAGE_KEYS.habits, data.habits);
     save(STORAGE_KEYS.journal, data.journal);
     save(STORAGE_KEYS.goals, data.goals);
+    save(STORAGE_KEYS.tasks, data.tasks);
     save(STORAGE_KEYS.schemaVersion, data.schemaVersion);
   }
 
   return data;
 }
 
-let { habits, journal, goals } = loadAndMigrate();
+let { habits, journal, goals, tasks } = loadAndMigrate();
 
 // ---------- Tabs ----------
 document.getElementById('tabs').addEventListener('click', (e) => {
@@ -135,15 +155,30 @@ document.getElementById('tabs').addEventListener('click', (e) => {
 // pending delete is tracked at a time; starting a new one finalizes the last.
 let pendingDelete = null; // { type, item, index, timer }
 
-function finalizePendingDelete() {
-  if (!pendingDelete) return;
-  clearTimeout(pendingDelete.timer);
-  const { type } = pendingDelete;
-  pendingDelete = null;
-  hideToast();
+function listFor(type) {
+  if (type === 'habit') return habits;
+  if (type === 'journal') return journal;
+  if (type === 'goal') return goals;
+  return tasks;
+}
+
+function saveList(type) {
   if (type === 'habit') save(STORAGE_KEYS.habits, habits);
   else if (type === 'journal') save(STORAGE_KEYS.journal, journal);
   else if (type === 'goal') save(STORAGE_KEYS.goals, goals);
+  else save(STORAGE_KEYS.tasks, tasks);
+}
+
+function finalizePendingDelete() {
+  if (!pendingDelete) return;
+  clearTimeout(pendingDelete.timer);
+  const { type, item } = pendingDelete;
+  pendingDelete = null;
+  hideToast();
+  saveList(type);
+  if (type === 'task' && item.googleEventId) {
+    deleteTaskFromCalendar(item.googleEventId);
+  }
 }
 
 function queueDelete(type, list, id, renderFn) {
@@ -166,8 +201,7 @@ function undoDelete(renderFn) {
   if (!pendingDelete) return;
   clearTimeout(pendingDelete.timer);
   const { type, item, index } = pendingDelete;
-  const list = type === 'habit' ? habits : type === 'journal' ? journal : goals;
-  list.splice(index, 0, item);
+  listFor(type).splice(index, 0, item);
   pendingDelete = null;
   hideToast();
   renderFn();
@@ -515,6 +549,7 @@ function startGoalEdit(id) {
       goal.title = val;
       goal.dueDate = dateInput.value || null;
       save(STORAGE_KEYS.goals, goals);
+      renderDashboard();
     }
     renderGoals();
   };
@@ -531,9 +566,700 @@ function startGoalEdit(id) {
   });
 }
 
+// ---------- Google Calendar ----------
+// Client-side-only OAuth via Google Identity Services (no backend, no client
+// secret). The Client ID is the user's own — it's not a secret, it just
+// identifies which Google Cloud project to authenticate against, so it's
+// safe to keep in localStorage. Access tokens are kept in memory only (never
+// persisted) since they're short-lived and sensitive; reload = reconnect.
+let googleTokenClient = null;
+let googleAccessToken = null;
+let googleTokenExpiresAt = 0;
+let googleConnected = false;
+
+function getGoogleClientId() {
+  return load(STORAGE_KEYS.googleClientId, null);
+}
+
+function isGoogleConnected() {
+  return googleConnected;
+}
+
+function ensureGoogleTokenClient() {
+  const clientId = getGoogleClientId();
+  if (!clientId) throw new Error('Add your Google Client ID first.');
+  if (!window.google || !window.google.accounts) {
+    throw new Error("Google sign-in script hasn't loaded yet — check your connection and try again.");
+  }
+  if (!googleTokenClient || googleTokenClient._clientId !== clientId) {
+    googleTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: GOOGLE_CALENDAR_SCOPE,
+      callback: () => {}, // overridden per-request in requestGoogleAccessToken
+    });
+    googleTokenClient._clientId = clientId;
+  }
+  return googleTokenClient;
+}
+
+function requestGoogleAccessToken(interactive) {
+  return new Promise((resolve, reject) => {
+    let client;
+    try {
+      client = ensureGoogleTokenClient();
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    client.callback = (resp) => {
+      if (resp.error) {
+        reject(new Error(resp.error));
+        return;
+      }
+      googleAccessToken = resp.access_token;
+      googleTokenExpiresAt = Date.now() + resp.expires_in * 1000;
+      resolve(googleAccessToken);
+    };
+    client.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+  });
+}
+
+async function calendarFetch(path, options = {}, retried = false) {
+  if (!googleAccessToken || Date.now() >= googleTokenExpiresAt - 5000) {
+    await requestGoogleAccessToken(!googleAccessToken);
+  }
+  const res = await fetch(`https://www.googleapis.com/calendar/v3${path}`, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${googleAccessToken}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (res.status === 401 && !retried) {
+    googleAccessToken = null;
+    return calendarFetch(path, options, true);
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Google Calendar error ${res.status}${text ? `: ${text}` : ''}`);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+function setGoogleStatus(text) {
+  const el = document.getElementById('googleStatus');
+  if (el) el.textContent = text;
+}
+
+function updateGoogleUI() {
+  const connected = isGoogleConnected();
+  document.getElementById('googleConnectBtn').hidden = connected;
+  document.getElementById('googleDisconnectBtn').hidden = !connected;
+  document.getElementById('googleSyncBtn').hidden = !connected;
+  if (connected) {
+    const last = load(STORAGE_KEYS.lastGoogleSyncAt, null);
+    const lastText = last ? ` · last synced ${new Date(last).toLocaleTimeString()}` : '';
+    setGoogleStatus(`Connected${lastText}`);
+  } else {
+    setGoogleStatus('Not connected.');
+  }
+}
+
+async function connectGoogleCalendar() {
+  try {
+    await requestGoogleAccessToken(true);
+    // The calendar.events scope covers the Events resource but not
+    // Calendars.get, so verify the token with an events call, not a
+    // calendar-metadata call (which would 403 with this scope).
+    await calendarFetch('/calendars/primary/events?maxResults=1');
+    googleConnected = true;
+    updateGoogleUI();
+    await syncFromGoogleCalendar();
+  } catch (err) {
+    showWarning('Could not connect to Google Calendar: ' + err.message);
+  }
+}
+
+function disconnectGoogleCalendar() {
+  if (googleAccessToken && window.google && window.google.accounts) {
+    google.accounts.oauth2.revoke(googleAccessToken, () => {});
+  }
+  googleAccessToken = null;
+  googleTokenExpiresAt = 0;
+  googleConnected = false;
+  updateGoogleUI();
+}
+
+async function pushTaskToCalendar(task) {
+  if (!isGoogleConnected() || !task.dueDate) return;
+  const body = {
+    summary: task.title,
+    start: { date: task.dueDate },
+    end: { date: task.dueDate },
+    extendedProperties: { private: { appleTaskApp: 'true', appleTaskId: task.id } },
+  };
+  try {
+    let ev;
+    if (task.googleEventId) {
+      ev = await calendarFetch(`/calendars/primary/events/${task.googleEventId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+    } else {
+      ev = await calendarFetch('/calendars/primary/events', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      task.googleEventId = ev.id;
+    }
+    save(STORAGE_KEYS.tasks, tasks);
+    renderTasksView();
+  } catch (err) {
+    showWarning('Could not sync task to Google Calendar: ' + err.message);
+  }
+}
+
+async function deleteTaskFromCalendar(googleEventId) {
+  try {
+    await calendarFetch(`/calendars/primary/events/${googleEventId}`, { method: 'DELETE' });
+  } catch (err) {
+    showWarning('Could not remove the matching Google Calendar event: ' + err.message);
+  }
+}
+
+function eventDueDate(ev) {
+  return ev.start && (ev.start.date || (ev.start.dateTime || '').slice(0, 10));
+}
+
+async function tagEventAsTask(googleEventId, taskId) {
+  try {
+    await calendarFetch(`/calendars/primary/events/${googleEventId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ extendedProperties: { private: { appleTaskApp: 'true', appleTaskId: taskId } } }),
+    });
+  } catch (err) {
+    // Import still succeeds locally even if tagging fails — worst case this
+    // event gets re-checked as "untagged" on the next sync.
+  }
+}
+
+async function syncFromGoogleCalendar() {
+  if (!isGoogleConnected()) return;
+  try {
+    const tracked = new URLSearchParams({
+      privateExtendedProperty: 'appleTaskApp=true',
+      showDeleted: 'false',
+      singleEvents: 'true',
+      maxResults: '250',
+    });
+    const trackedData = await calendarFetch(`/calendars/primary/events?${tracked}`);
+
+    // Also pull everything else on the primary calendar in a near-term
+    // window, so an event added straight in Google Calendar (never touched
+    // by this app) shows up as a task too — not just round-tripped edits to
+    // tasks the app already created.
+    const now = Date.now();
+    const windowParams = new URLSearchParams({
+      timeMin: new Date(now - 30 * 86400000).toISOString(),
+      timeMax: new Date(now + 90 * 86400000).toISOString(),
+      showDeleted: 'false',
+      singleEvents: 'true',
+      maxResults: '250',
+      orderBy: 'startTime',
+    });
+    const windowData = await calendarFetch(`/calendars/primary/events?${windowParams}`);
+
+    const remoteById = new Map();
+    (trackedData.items || []).forEach((ev) => remoteById.set(ev.id, ev));
+    (windowData.items || []).forEach((ev) => remoteById.set(ev.id, ev));
+
+    let changed = false;
+    tasks.forEach((task) => {
+      if (!task.googleEventId) return;
+      const ev = remoteById.get(task.googleEventId);
+      if (!ev) {
+        // Removed on Google's side — unlink but keep the local task, so a
+        // calendar-side delete never silently destroys tracked data here.
+        task.googleEventId = null;
+        changed = true;
+        return;
+      }
+      const remoteDue = eventDueDate(ev);
+      if (ev.summary && ev.summary !== task.title) {
+        task.title = ev.summary;
+        changed = true;
+      }
+      if (remoteDue && remoteDue !== task.dueDate) {
+        task.dueDate = remoteDue;
+        changed = true;
+      }
+    });
+
+    const linkedIds = new Set(tasks.map((t) => t.googleEventId).filter(Boolean));
+    const imported = [];
+    (windowData.items || []).forEach((ev) => {
+      if (ev.status === 'cancelled' || linkedIds.has(ev.id)) return;
+      if (ev.extendedProperties && ev.extendedProperties.private && ev.extendedProperties.private.appleTaskApp === 'true') return;
+      const dueDate = eventDueDate(ev);
+      if (!dueDate) return;
+      const task = { id: uid(), title: ev.summary || '(untitled event)', dueDate, status: 'todo', googleEventId: ev.id };
+      tasks.push(task);
+      linkedIds.add(ev.id);
+      imported.push(task);
+      changed = true;
+    });
+
+    if (changed) {
+      save(STORAGE_KEYS.tasks, tasks);
+      renderTasksView();
+      renderDashboard();
+    }
+    save(STORAGE_KEYS.lastGoogleSyncAt, Date.now());
+    updateGoogleUI();
+
+    // Tag imports after the local state is saved so a page reload never
+    // loses the task even if these PATCH calls are slow or fail.
+    await Promise.all(imported.map((task) => tagEventAsTask(task.googleEventId, task.id)));
+  } catch (err) {
+    showWarning('Google Calendar sync failed: ' + err.message);
+  }
+}
+
+document.getElementById('googleConnectBtn').addEventListener('click', connectGoogleCalendar);
+document.getElementById('googleDisconnectBtn').addEventListener('click', disconnectGoogleCalendar);
+document.getElementById('googleSyncBtn').addEventListener('click', syncFromGoogleCalendar);
+document.getElementById('googleClientIdSaveBtn').addEventListener('click', () => {
+  const input = document.getElementById('googleClientIdInput');
+  const value = input.value.trim();
+  if (!value) return;
+  save(STORAGE_KEYS.googleClientId, value);
+  googleTokenClient = null; // force re-init against the new client id
+  showWarning('Google Client ID saved. Click Connect to sign in.');
+});
+
+(function initGoogleClientIdField() {
+  const saved = getGoogleClientId();
+  if (saved) document.getElementById('googleClientIdInput').value = saved;
+  updateGoogleUI();
+})();
+
+// ---------- Tasks ----------
+const TASK_STATUSES = ['todo', 'in_progress', 'done'];
+const TASK_STATUS_LABELS = { todo: 'Open', in_progress: 'In Progress', done: 'Done' };
+
+function taskMeta(task, today) {
+  const overdue = task.dueDate && task.dueDate < today && task.status !== 'done';
+  const dueText = task.dueDate ? ` · due ${task.dueDate}` : '';
+  const label = overdue ? 'Overdue' : TASK_STATUS_LABELS[task.status];
+  return { overdue, dueText, label };
+}
+
+function taskCardHTML(task, today) {
+  const { overdue, dueText, label } = taskMeta(task, today);
+  const syncBadge = task.googleEventId ? '<span class="sync-badge">📅 synced</span>' : '';
+  return `
+    <button class="check-btn ${task.status === 'done' ? 'done' : ''}" data-id="${escapeHtml(task.id)}" aria-label="Mark done">${task.status === 'done' ? '✓' : ''}</button>
+    <div class="item-main">
+      <div class="item-title" data-title>${escapeHtml(task.title)}</div>
+      <div class="item-meta ${overdue ? 'overdue' : ''}" data-meta>${escapeHtml(label)}${escapeHtml(dueText)} ${syncBadge}</div>
+    </div>
+    <button class="edit-btn" data-edit="${escapeHtml(task.id)}" aria-label="Edit">✎</button>
+    <button class="delete-btn" data-delete="${escapeHtml(task.id)}" aria-label="Delete">✕</button>
+  `;
+}
+
+function sortedTasks() {
+  return [...tasks].sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
+}
+
+function renderTasks() {
+  const list = document.getElementById('taskList');
+  list.innerHTML = '';
+  if (tasks.length === 0) {
+    list.innerHTML = '<li class="empty-state">No tasks yet. Add one above.</li>';
+    return;
+  }
+  const today = todayKey();
+  sortedTasks().forEach((task) => {
+    const li = document.createElement('li');
+    li.className = 'item-card';
+    li.dataset.id = task.id;
+    li.innerHTML = taskCardHTML(task, today);
+    list.appendChild(li);
+  });
+}
+
+// ---------- Task board (kanban) ----------
+function renderBoard() {
+  const board = document.getElementById('taskBoard');
+  board.innerHTML = '';
+  const today = todayKey();
+  const byStatus = sortedTasks().reduce(
+    (acc, t) => {
+      (acc[t.status] || acc.todo).push(t);
+      return acc;
+    },
+    { todo: [], in_progress: [], done: [] }
+  );
+
+  TASK_STATUSES.forEach((status) => {
+    const col = document.createElement('div');
+    col.className = 'board-column';
+    col.dataset.status = status;
+    const statusIdx = TASK_STATUSES.indexOf(status);
+    const cards = byStatus[status]
+      .map((task) => {
+        const { overdue, dueText, label } = taskMeta(task, today);
+        const syncBadge = task.googleEventId ? '<span class="sync-badge">📅 synced</span>' : '';
+        return `
+        <li class="item-card board-card" draggable="true" data-id="${escapeHtml(task.id)}">
+          <div class="item-main">
+            <div class="item-title" data-title>${escapeHtml(task.title)}</div>
+            <div class="item-meta ${overdue ? 'overdue' : ''}" data-meta>${escapeHtml(label)}${escapeHtml(dueText)} ${syncBadge}</div>
+          </div>
+          <div class="board-card-actions">
+            <button class="board-move-btn" data-move="prev" data-id="${escapeHtml(task.id)}" aria-label="Move left" ${statusIdx === 0 ? 'disabled' : ''}>‹</button>
+            <button class="board-move-btn" data-move="next" data-id="${escapeHtml(task.id)}" aria-label="Move right" ${statusIdx === TASK_STATUSES.length - 1 ? 'disabled' : ''}>›</button>
+            <button class="edit-btn" data-edit="${escapeHtml(task.id)}" aria-label="Edit">✎</button>
+            <button class="delete-btn" data-delete="${escapeHtml(task.id)}" aria-label="Delete">✕</button>
+          </div>
+        </li>`;
+      })
+      .join('');
+    col.innerHTML = `
+      <div class="board-column-header">
+        <span>${escapeHtml(TASK_STATUS_LABELS[status])}</span>
+        <span class="board-count">${byStatus[status].length}</span>
+      </div>
+      <ul class="board-card-list">${cards || '<li class="empty-state board-empty">No tasks</li>'}</ul>
+    `;
+    board.appendChild(col);
+  });
+}
+
+function setTaskStatus(id, newStatus) {
+  const task = tasks.find((t) => t.id === id);
+  if (!task || task.status === newStatus) return;
+  task.status = newStatus;
+  save(STORAGE_KEYS.tasks, tasks);
+  // Kanban status has no Google Calendar equivalent, so this deliberately
+  // never calls pushTaskToCalendar() — only title/date edits sync.
+  renderTasksView();
+  renderDashboard();
+}
+
+// ---------- List / Board view toggle ----------
+let taskViewMode = load(STORAGE_KEYS.taskViewMode, 'list');
+
+function renderTasksView() {
+  const isBoard = taskViewMode === 'board';
+  document.getElementById('taskList').hidden = isBoard;
+  document.getElementById('taskBoard').hidden = !isBoard;
+  document.querySelectorAll('#taskViewToggle .view-toggle-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === taskViewMode);
+  });
+  if (isBoard) renderBoard();
+  else renderTasks();
+}
+
+document.getElementById('taskViewToggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-view]');
+  if (!btn) return;
+  taskViewMode = btn.dataset.view;
+  save(STORAGE_KEYS.taskViewMode, taskViewMode);
+  renderTasksView();
+});
+
+document.getElementById('taskForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = document.getElementById('taskInput');
+  const dateInput = document.getElementById('taskDate');
+  const title = input.value.trim();
+  if (!title) return;
+  const task = { id: uid(), title, dueDate: dateInput.value || null, status: 'todo', googleEventId: null };
+  tasks.push(task);
+  const ok = save(STORAGE_KEYS.tasks, tasks);
+  if (!ok) {
+    tasks.pop();
+    return;
+  }
+  input.value = '';
+  dateInput.value = '';
+  renderTasksView();
+  renderDashboard();
+  pushTaskToCalendar(task);
+});
+
+document.getElementById('taskList').addEventListener('click', (e) => {
+  const checkBtn = e.target.closest('.check-btn');
+  const editBtn = e.target.closest('[data-edit]');
+  const delBtn = e.target.closest('[data-delete]');
+  if (checkBtn) {
+    const task = tasks.find((t) => t.id === checkBtn.dataset.id);
+    setTaskStatus(task.id, task.status === 'done' ? 'todo' : 'done');
+  } else if (editBtn) {
+    startTaskEdit(editBtn.dataset.edit);
+  } else if (delBtn) {
+    queueDelete('task', tasks, delBtn.dataset.delete, renderTasksView);
+  }
+});
+
+document.getElementById('taskBoard').addEventListener('click', (e) => {
+  const moveBtn = e.target.closest('[data-move]');
+  const editBtn = e.target.closest('[data-edit]');
+  const delBtn = e.target.closest('[data-delete]');
+  if (moveBtn) {
+    const task = tasks.find((t) => t.id === moveBtn.dataset.id);
+    const idx = TASK_STATUSES.indexOf(task.status) + (moveBtn.dataset.move === 'next' ? 1 : -1);
+    if (idx >= 0 && idx < TASK_STATUSES.length) setTaskStatus(task.id, TASK_STATUSES[idx]);
+  } else if (editBtn) {
+    startTaskEdit(editBtn.dataset.edit);
+  } else if (delBtn) {
+    queueDelete('task', tasks, delBtn.dataset.delete, renderTasksView);
+  }
+});
+
+document.getElementById('taskBoard').addEventListener('dragstart', (e) => {
+  const card = e.target.closest('.board-card');
+  if (!card) return;
+  e.dataTransfer.setData('text/plain', card.dataset.id);
+  card.classList.add('dragging');
+});
+
+document.getElementById('taskBoard').addEventListener('dragend', (e) => {
+  const card = e.target.closest('.board-card');
+  if (card) card.classList.remove('dragging');
+});
+
+document.getElementById('taskBoard').addEventListener('dragover', (e) => {
+  const col = e.target.closest('.board-column');
+  if (!col) return;
+  e.preventDefault();
+  col.classList.add('drag-over');
+});
+
+document.getElementById('taskBoard').addEventListener('dragleave', (e) => {
+  const col = e.target.closest('.board-column');
+  if (col) col.classList.remove('drag-over');
+});
+
+document.getElementById('taskBoard').addEventListener('drop', (e) => {
+  const col = e.target.closest('.board-column');
+  if (!col) return;
+  e.preventDefault();
+  col.classList.remove('drag-over');
+  const id = e.dataTransfer.getData('text/plain');
+  if (id) setTaskStatus(id, col.dataset.status);
+});
+
+function startTaskEdit(id) {
+  const task = tasks.find((t) => t.id === id);
+  const li = document.querySelector(`#taskList [data-id="${CSS.escape(id)}"], #taskBoard [data-id="${CSS.escape(id)}"]`);
+  const titleEl = li.querySelector('[data-title]');
+  const metaEl = li.querySelector('[data-meta]');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'edit-goal';
+  const titleInput = document.createElement('input');
+  titleInput.type = 'text';
+  titleInput.className = 'edit-input';
+  titleInput.value = task.title;
+  const dateInput = document.createElement('input');
+  dateInput.type = 'date';
+  dateInput.className = 'edit-input';
+  dateInput.value = task.dueDate || '';
+  wrap.appendChild(titleInput);
+  wrap.appendChild(dateInput);
+
+  titleEl.replaceWith(wrap);
+  metaEl.remove();
+  titleInput.focus();
+  titleInput.select();
+
+  const commit = () => {
+    const val = titleInput.value.trim();
+    if (val) {
+      task.title = val;
+      task.dueDate = dateInput.value || null;
+      save(STORAGE_KEYS.tasks, tasks);
+      pushTaskToCalendar(task);
+      renderDashboard();
+    }
+    renderTasksView();
+  };
+  [titleInput, dateInput].forEach((el) => {
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') commit();
+      else if (e.key === 'Escape') renderTasksView();
+    });
+    el.addEventListener('blur', () => {
+      setTimeout(() => {
+        if (!wrap.contains(document.activeElement)) commit();
+      }, 0);
+    });
+  });
+}
+
+// ---------- .ics import / export ----------
+// Lets tasks round-trip through any calendar app (not just Google): export
+// writes a standard iCalendar file, import reads one (e.g. a forwarded
+// meeting invite) and turns each VEVENT into a task.
+function icsUnescapeText(str) {
+  return str.replace(/\\n/gi, ' ').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\');
+}
+
+function icsEscapeText(str) {
+  return String(str)
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\n/g, '\\n');
+}
+
+function icsDateValueToLocalDateKey(value) {
+  const m = /^(\d{4})(\d{2})(\d{2})/.exec(value || '');
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+function parseICS(text) {
+  // Unfold RFC5545 continuation lines (a line starting with a space/tab
+  // continues the previous line) before parsing property:value pairs.
+  const rawLines = text.split(/\r\n|\n|\r/);
+  const lines = [];
+  rawLines.forEach((line) => {
+    if ((line.startsWith(' ') || line.startsWith('\t')) && lines.length) {
+      lines[lines.length - 1] += line.slice(1);
+    } else {
+      lines.push(line);
+    }
+  });
+
+  const events = [];
+  let current = null;
+  lines.forEach((line) => {
+    if (line === 'BEGIN:VEVENT') {
+      current = {};
+    } else if (line === 'END:VEVENT') {
+      if (current) events.push(current);
+      current = null;
+    } else if (current) {
+      const idx = line.indexOf(':');
+      if (idx === -1) return;
+      const key = line.slice(0, idx).split(';')[0].toUpperCase();
+      const value = line.slice(idx + 1);
+      if (key === 'SUMMARY') current.summary = icsUnescapeText(value);
+      else if (key === 'DTSTART') current.dtstart = value;
+      else if (key === 'UID') current.uid = value;
+    }
+  });
+
+  return events
+    .map((ev) => ({
+      title: ev.summary || 'Untitled event',
+      dueDate: icsDateValueToLocalDateKey(ev.dtstart),
+      uid: ev.uid || null,
+    }))
+    .filter((ev) => ev.dueDate);
+}
+
+function exportTasksAsICS() {
+  const withDates = tasks.filter((t) => t.dueDate);
+  if (withDates.length === 0) {
+    showWarning('No tasks with a due date to export.');
+    return;
+  }
+  const stampDate = `${todayKey().replace(/-/g, '')}T000000Z`;
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ApplesOnly//Tasks//EN', 'CALSCALE:GREGORIAN'];
+  withDates.forEach((t) => {
+    const dateStr = t.dueDate.replace(/-/g, '');
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:${t.icsUid || t.id}@applesonly`,
+      `DTSTAMP:${stampDate}`,
+      `DTSTART;VALUE=DATE:${dateStr}`,
+      `DTEND;VALUE=DATE:${dateStr}`,
+      `SUMMARY:${icsEscapeText(t.title)}`,
+      `STATUS:${t.status === 'done' ? 'CONFIRMED' : 'NEEDS-ACTION'}`,
+      'END:VEVENT'
+    );
+  });
+  lines.push('END:VCALENDAR');
+
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `apples-only-tasks-${todayKey()}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+let pendingICSImport = null;
+
+function handleICSFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let events;
+    try {
+      events = parseICS(reader.result);
+    } catch {
+      showWarning("Could not read that .ics file.");
+      return;
+    }
+    if (events.length === 0) {
+      showWarning('No dated events found in that file.');
+      return;
+    }
+    pendingICSImport = events;
+    document.getElementById('icsImportSummary').textContent =
+      `Found ${events.length} event(s) in this file. Add them as tasks?`;
+    document.getElementById('icsImportConfirm').classList.add('visible');
+  };
+  reader.readAsText(file);
+}
+
+function confirmICSImport() {
+  if (!pendingICSImport) return;
+  const existingUids = new Set(tasks.map((t) => t.icsUid).filter(Boolean));
+  const newTasks = [];
+  pendingICSImport.forEach((ev) => {
+    if (ev.uid && existingUids.has(ev.uid)) return; // already imported previously
+    const task = { id: uid(), title: ev.title, dueDate: ev.dueDate, status: 'todo', googleEventId: null, icsUid: ev.uid || null };
+    tasks.push(task);
+    newTasks.push(task);
+  });
+  const skipped = pendingICSImport.length - newTasks.length;
+  save(STORAGE_KEYS.tasks, tasks);
+  renderTasksView();
+  renderDashboard();
+  newTasks.forEach((task) => {
+    if (task.dueDate) pushTaskToCalendar(task);
+  });
+  cancelICSImport();
+  showWarning(`Imported ${newTasks.length} task(s).${skipped ? ` Skipped ${skipped} already-imported duplicate(s).` : ''}`);
+}
+
+function cancelICSImport() {
+  pendingICSImport = null;
+  document.getElementById('icsImportConfirm').classList.remove('visible');
+  document.getElementById('icsImportFile').value = '';
+}
+
+document.getElementById('icsExportBtn').addEventListener('click', exportTasksAsICS);
+document.getElementById('icsImportFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) handleICSFile(file);
+});
+document.getElementById('icsImportConfirmBtn').addEventListener('click', confirmICSImport);
+document.getElementById('icsImportCancelBtn').addEventListener('click', cancelICSImport);
+
 // ---------- Backup: export / import ----------
 function hasAnyData() {
-  return habits.length > 0 || journal.length > 0 || goals.length > 0;
+  return habits.length > 0 || journal.length > 0 || goals.length > 0 || tasks.length > 0;
 }
 
 function daysSinceLastBackup() {
@@ -549,6 +1275,7 @@ function exportBackup() {
     habits,
     journal,
     goals,
+    tasks,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -570,7 +1297,8 @@ function isValidBackup(data) {
     typeof data === 'object' &&
     Array.isArray(data.habits) &&
     Array.isArray(data.journal) &&
-    Array.isArray(data.goals)
+    Array.isArray(data.goals) &&
+    (data.tasks === undefined || Array.isArray(data.tasks))
   );
 }
 
@@ -592,9 +1320,10 @@ function handleImportFile(file) {
     }
     pendingImport = data;
     const summary = document.getElementById('importSummary');
+    const taskCount = Array.isArray(data.tasks) ? data.tasks.length : 0;
     summary.textContent =
       `This file has ${data.habits.length} habit(s), ${data.journal.length} journal entr${data.journal.length === 1 ? 'y' : 'ies'}, ` +
-      `and ${data.goals.length} goal(s)` +
+      `${data.goals.length} goal(s), and ${taskCount} task(s)` +
       (data.exportedAt ? `, exported ${new Date(data.exportedAt).toLocaleString()}` : '') +
       '. Importing will replace your current data. Continue?';
     document.getElementById('importConfirm').classList.add('visible');
@@ -604,35 +1333,42 @@ function handleImportFile(file) {
 
 function confirmImport() {
   if (!pendingImport) return;
-  const previous = { habits, journal, goals };
+  const previous = { habits, journal, goals, tasks };
   const migrated = migrate({
     habits: pendingImport.habits,
     journal: pendingImport.journal,
     goals: pendingImport.goals,
+    tasks: Array.isArray(pendingImport.tasks) ? pendingImport.tasks : [],
     schemaVersion: pendingImport.schemaVersion || 0,
   });
   habits = migrated.habits;
   journal = migrated.journal;
   goals = migrated.goals;
+  tasks = migrated.tasks;
   save(STORAGE_KEYS.habits, habits);
   save(STORAGE_KEYS.journal, journal);
   save(STORAGE_KEYS.goals, goals);
+  save(STORAGE_KEYS.tasks, tasks);
   save(STORAGE_KEYS.schemaVersion, migrated.schemaVersion);
   renderHabits();
   renderJournal();
   renderGoals();
+  renderTasksView();
   renderDashboard();
   cancelImport();
   showToast('Backup imported.', () => {
     habits = previous.habits;
     journal = previous.journal;
     goals = previous.goals;
+    tasks = previous.tasks;
     save(STORAGE_KEYS.habits, habits);
     save(STORAGE_KEYS.journal, journal);
     save(STORAGE_KEYS.goals, goals);
+    save(STORAGE_KEYS.tasks, tasks);
     renderHabits();
     renderJournal();
     renderGoals();
+    renderTasksView();
     renderDashboard();
     hideToast();
   });
@@ -659,9 +1395,11 @@ window.addEventListener('storage', (e) => {
   habits = load(STORAGE_KEYS.habits, []);
   journal = load(STORAGE_KEYS.journal, []);
   goals = load(STORAGE_KEYS.goals, []);
+  tasks = load(STORAGE_KEYS.tasks, []);
   renderHabits();
   renderJournal();
   renderGoals();
+  renderTasksView();
   renderDashboard();
 });
 
@@ -780,6 +1518,124 @@ function renderActivity() {
   }
 }
 
+// ---------- Calendar ----------
+let calendarViewDate = new Date();
+calendarViewDate.setDate(1);
+let calendarSelectedDay = null;
+
+function getMonthGrid(year, month) {
+  const first = new Date(year, month, 1);
+  const start = new Date(first);
+  start.setDate(start.getDate() - start.getDay()); // back up to the Sunday on/before the 1st
+  const days = [];
+  const cursor = new Date(start);
+  for (let i = 0; i < 42; i++) {
+    days.push({ date: new Date(cursor), key: localDateKey(cursor), inMonth: cursor.getMonth() === month });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
+function itemsByDueDate() {
+  const map = {};
+  tasks.forEach((t) => {
+    if (!t.dueDate) return;
+    (map[t.dueDate] = map[t.dueDate] || { tasks: [], goals: [] }).tasks.push(t);
+  });
+  goals.forEach((g) => {
+    if (!g.dueDate) return;
+    (map[g.dueDate] = map[g.dueDate] || { tasks: [], goals: [] }).goals.push(g);
+  });
+  return map;
+}
+
+function renderCalendar() {
+  const year = calendarViewDate.getFullYear();
+  const month = calendarViewDate.getMonth();
+  document.getElementById('calendarMonthLabel').textContent = calendarViewDate.toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const today = todayKey();
+  const byDate = itemsByDueDate();
+  const grid = document.getElementById('calendarGrid');
+  grid.innerHTML = '';
+
+  getMonthGrid(year, month).forEach((day) => {
+    const entry = byDate[day.key];
+    const itemCount = entry ? entry.tasks.length + entry.goals.length : 0;
+    const overdue = entry && entry.tasks.some((t) => t.status !== 'done' && day.key < today);
+    const firstTitle = entry ? (entry.tasks[0] || entry.goals[0]).title : '';
+
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'calendar-day';
+    if (!day.inMonth) cell.classList.add('other-month');
+    if (day.key === today) cell.classList.add('today');
+    if (day.key === calendarSelectedDay) cell.classList.add('selected');
+    cell.dataset.date = day.key;
+    cell.innerHTML = `
+      <span class="calendar-day-num">${day.date.getDate()}</span>
+      ${itemCount ? `<span class="calendar-day-badge ${overdue ? 'overdue' : ''}">${itemCount}</span>` : ''}
+      ${firstTitle ? `<span class="calendar-day-preview">${escapeHtml(firstTitle)}</span>` : ''}
+    `;
+    grid.appendChild(cell);
+  });
+
+  renderCalendarDayDetail(calendarSelectedDay);
+}
+
+function renderCalendarDayDetail(dateKey) {
+  const panel = document.getElementById('calendarDayDetail');
+  const byDate = itemsByDueDate();
+  const entry = dateKey && byDate[dateKey];
+  if (!entry) {
+    panel.hidden = true;
+    return;
+  }
+  const today = todayKey();
+  document.getElementById('calendarDayDetailTitle').textContent = new Date(`${dateKey}T00:00:00`).toLocaleDateString(
+    undefined,
+    { weekday: 'long', month: 'long', day: 'numeric' }
+  );
+  const list = document.getElementById('calendarDayDetailList');
+  const taskRows = entry.tasks.map((t) => {
+    const overdue = t.status !== 'done' && dateKey < today;
+    return `<li class="item-card"><div class="item-main"><div class="item-title">📋 ${escapeHtml(t.title)}</div><div class="item-meta ${overdue ? 'overdue' : ''}">${escapeHtml(TASK_STATUS_LABELS[t.status])}</div></div></li>`;
+  });
+  const goalRows = entry.goals.map(
+    (g) =>
+      `<li class="item-card"><div class="item-main"><div class="item-title">🎯 ${escapeHtml(g.title)}</div><div class="item-meta">${g.progress}% complete</div></div></li>`
+  );
+  list.innerHTML = taskRows.concat(goalRows).join('') || '<li class="empty-state">Nothing due.</li>';
+  panel.hidden = false;
+}
+
+document.getElementById('calendarPrevBtn').addEventListener('click', () => {
+  calendarViewDate.setMonth(calendarViewDate.getMonth() - 1);
+  renderCalendar();
+});
+
+document.getElementById('calendarNextBtn').addEventListener('click', () => {
+  calendarViewDate.setMonth(calendarViewDate.getMonth() + 1);
+  renderCalendar();
+});
+
+document.getElementById('calendarTodayBtn').addEventListener('click', () => {
+  calendarViewDate = new Date();
+  calendarViewDate.setDate(1);
+  calendarSelectedDay = todayKey();
+  renderCalendar();
+});
+
+document.getElementById('calendarGrid').addEventListener('click', (e) => {
+  const cell = e.target.closest('.calendar-day');
+  if (!cell) return;
+  calendarSelectedDay = calendarSelectedDay === cell.dataset.date ? null : cell.dataset.date;
+  renderCalendar();
+});
+
 // ---------- Dashboard ----------
 function renderDashboard() {
   const grid = document.getElementById('dashboardGrid');
@@ -791,6 +1647,8 @@ function renderDashboard() {
   const latestMood = journal.length
     ? [...journal].sort((a, b) => b.createdAt - a.createdAt)[0].mood
     : '—';
+  const tasksDueToday = tasks.filter((t) => t.status !== 'done' && t.dueDate === today).length;
+  const overdueTasks = tasks.filter((t) => t.status !== 'done' && t.dueDate && t.dueDate < today).length;
 
   const stats = [
     { value: `${habitsDoneToday}/${habits.length || 0}`, label: 'Habits done today' },
@@ -799,6 +1657,8 @@ function renderDashboard() {
     { value: completedGoals, label: 'Goals completed' },
     { value: journal.length, label: 'Journal entries' },
     { value: latestMood, label: 'Latest mood' },
+    { value: tasksDueToday, label: 'Tasks due today' },
+    { value: overdueTasks, label: 'Overdue tasks' },
   ];
 
   grid.innerHTML = stats
@@ -812,6 +1672,7 @@ function renderDashboard() {
     .join('');
 
   renderActivity();
+  renderCalendar();
 
   const backupCard = document.getElementById('backupCard');
   const backupStatus = document.getElementById('backupStatus');
@@ -837,4 +1698,5 @@ function escapeHtml(str) {
 renderHabits();
 renderJournal();
 renderGoals();
+renderTasksView();
 renderDashboard();
