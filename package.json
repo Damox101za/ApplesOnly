@@ -1,0 +1,12 @@
+{
+  "name": "applesonly",
+  "version": "1.0.0",
+  "description": "A personal life tracker: habits, journal, and goals.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
