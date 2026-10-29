@@ -92,6 +92,35 @@ const BOX_INTERVAL_DAYS = [0, 1, 2, 4, 7, 14];
 const MASTERED_BOX = 5;
 const ROUND_SIZE = 10;
 
+// ---------- Difficulty levels ----------
+// This table is where you change how hard the game is. Each row is a level.
+//   words        which words come up. Every word in the dictionary has a
+//                difficulty score (see scripts/build-sound-data.js):
+//                  difficulty = surprise + 0.7 × rarity
+//                surprise = how unusual its spelling is for its sounds,
+//                rarity = how uncommon the word is. Words are split into 5
+//                equal groups; level N uses group N. Your tricky words always
+//                come up, whatever the level.
+//   roundSize    words per practice round
+//   towerStart   seconds per word at the start of the tower game
+//   towerFastest the timer never drops below this
+//   lives        misses allowed in the tower game
+//   spotChoices  options in "Spot the right one" (2 to 4)
+//   hints        allow the hint and sentence-hint buttons
+//   showLetters  show how many letters the word has, up front
+const LEVELS = [
+  { name: 'Starter', blurb: 'Short, everyday words', roundSize: 8, towerStart: 22, towerFastest: 12, lives: 5, spotChoices: 2, hints: true, showLetters: true },
+  { name: 'Easy', blurb: 'Common words with regular spellings', roundSize: 10, towerStart: 18, towerFastest: 10, lives: 4, spotChoices: 3, hints: true, showLetters: false },
+  { name: 'Medium', blurb: 'Longer words, a few tricky patterns', roundSize: 10, towerStart: 15, towerFastest: 8, lives: 3, spotChoices: 4, hints: true, showLetters: false },
+  { name: 'Hard', blurb: 'Silent letters, double letters, odd vowels', roundSize: 12, towerStart: 12, towerFastest: 7, lives: 3, spotChoices: 4, hints: true, showLetters: false },
+  { name: 'Expert', blurb: 'The words most people get wrong', roundSize: 12, towerStart: 9, towerFastest: 5, lives: 2, spotChoices: 4, hints: false, showLetters: false },
+];
+// How many of each level's most common words to draw from.
+const LEVEL_POOL_SIZE = 600;
+// Move up when a round scores at least this, suggest easier below the second.
+const LEVEL_UP_SCORE = 0.9;
+const LEVEL_DOWN_SCORE = 0.4;
+
 const Spelling = (() => {
   let data = null; // { words, stats, log, bestTower, onlyMine }
   let session = null; // practice round state
@@ -103,7 +132,7 @@ const Spelling = (() => {
   }
 
   function emptyData() {
-    return { words: [], stats: {}, log: {}, bestTower: 0, onlyMine: false, sound: null };
+    return { words: [], stats: {}, log: {}, bestTower: 0, onlyMine: false, sound: null, level: 2, voice: '', rate: 0.85, style: '' };
   }
 
   function normalize(raw) {
@@ -115,6 +144,10 @@ const Spelling = (() => {
     // Your sound-spelling habits, learned by the Sound it out finder.
     const s = d.sound;
     if (!s || typeof s !== 'object' || !s.counts || !s.totals || !s.patterns) d.sound = { counts: {}, totals: {}, patterns: {} };
+    d.level = Math.min(LEVELS.length, Math.max(1, Math.round(Number(d.level) || 2)));
+    d.rate = Math.min(1.3, Math.max(0.4, Number(d.rate) || 0.85));
+    if (d.style !== 'gb' && d.style !== 'us') d.style = /^en-(us|ph)/i.test(navigator.language || '') ? 'us' : 'gb';
+    if (typeof d.voice !== 'string') d.voice = '';
     return d;
   }
 
@@ -196,11 +229,24 @@ const Spelling = (() => {
   }
 
   // ---------- Picking words ----------
+  function level() {
+    return LEVELS[data.level - 1];
+  }
+
+  // Your words, plus starter and dictionary words at your level.
   function pool() {
     const mine = data.words.map((w) => w.word);
     if (data.onlyMine && mine.length) return mine;
     const seen = new Set();
-    return [...mine, ...STARTER_WORDS.map((w) => w.word)].filter((w) => {
+    let extra = STARTER_WORDS.map((w) => w.word);
+    if (engine) {
+      extra = extra.filter((w) => {
+        const l = engine.levelOf(w);
+        return l ? l === data.level : data.level >= 4;
+      });
+      extra.push(...levelCache().map(displayWord));
+    }
+    return [...mine, ...extra].filter((w) => {
       const k = keyOf(w);
       if (seen.has(k)) return false;
       seen.add(k);
@@ -214,7 +260,9 @@ const Spelling = (() => {
     const ranked = pool().map((word) => {
       const s = statFor(word);
       const due = !s.due || s.due <= today;
-      return { word, score: (due ? 0 : 100) + (isMine(word) ? 0 : 10) + s.box * 2 + Math.random() * 3 };
+      // New words get a wide shuffle so each round feels different.
+      const seen = s.right || s.wrong;
+      return { word, score: (due ? 0 : 100) + (isMine(word) ? 0 : 10) + s.box * 2 + Math.random() * (seen ? 3 : 20) };
     });
     ranked.sort((a, b) => a.score - b.score);
     return shuffle(ranked.slice(0, n).map((r) => r.word));
@@ -359,15 +407,55 @@ const Spelling = (() => {
   // ---------- Speech ----------
   const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
 
-  function speak(text, rate = 0.85) {
+  // Accent names for voice language codes.
+  const ACCENTS = {
+    'en-za': 'South African', 'en-gb': 'British', 'en-us': 'American', 'en-au': 'Australian', 'en-in': 'Indian',
+    'en-ie': 'Irish', 'en-nz': 'New Zealand', 'en-ca': 'Canadian', 'en-ng': 'Nigerian', 'en-ke': 'Kenyan',
+    'en-gh': 'Ghanaian', 'en-sg': 'Singaporean', 'en-ph': 'Filipino', 'en-tz': 'Tanzanian',
+  };
+  const ACCENT_ORDER = ['en-za', 'en-gb', 'en-us', 'en-au', 'en-ie', 'en-nz', 'en-in'];
+
+  function accentOf(lang) {
+    const k = String(lang || '').toLowerCase().replace('_', '-').slice(0, 5);
+    return ACCENTS[k] || lang;
+  }
+
+  function englishVoices() {
+    if (!canSpeak) return [];
+    const rank = (v) => {
+      const i = ACCENT_ORDER.indexOf(v.lang.toLowerCase().replace('_', '-').slice(0, 5));
+      return i === -1 ? 99 : i;
+    };
+    return window.speechSynthesis
+      .getVoices()
+      .filter((v) => /^en([-_]|$)/i.test(v.lang))
+      .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  }
+
+  function chosenVoice() {
+    if (!data.voice) return null;
+    return englishVoices().find((v) => v.voiceURI === data.voice) || null;
+  }
+
+  function utterance(text, speed = 1) {
+    const u = new SpeechSynthesisUtterance(text);
+    const voice = chosenVoice();
+    if (voice) {
+      u.voice = voice;
+      u.lang = voice.lang;
+    } else {
+      u.lang = (navigator.language || '').toLowerCase().startsWith('en') ? navigator.language : 'en-GB';
+    }
+    u.rate = Math.min(2, Math.max(0.1, data.rate * speed));
+    return u;
+  }
+
+  // speed multiplies your chosen rate: 0.55 is the slow button.
+  function speak(text, speed = 1) {
     if (!canSpeak) return false;
     try {
       window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      const lang = (navigator.language || '').toLowerCase().startsWith('en') ? navigator.language : 'en-US';
-      u.lang = lang;
-      u.rate = rate;
-      window.speechSynthesis.speak(u);
+      window.speechSynthesis.speak(utterance(text, speed));
       return true;
     } catch {
       return false;
@@ -379,7 +467,57 @@ const Spelling = (() => {
   }
 
   function saySentence(entry) {
-    speak(entry.sentence.replace('___', entry.word), 0.9);
+    speak(entry.sentence.replace('___', entry.word), 1.05);
+  }
+
+  // Says a word one part at a time (NESS · uh · sair · ee), lighting up each
+  // part on screen if `el` holds the parts, then says the whole word slowly.
+  function sayByParts(word, el) {
+    if (!canSpeak) return;
+    const syl = engine && engine.syllables(word);
+    window.speechSynthesis.cancel();
+    if (!syl || syl.parts.length < 2) {
+      window.speechSynthesis.speak(utterance(word, 0.55));
+      return;
+    }
+    const spans = el ? el.querySelectorAll('.say-part') : [];
+    const mark = (i) => spans.forEach((sp, j) => sp.classList.toggle('speaking', i === j));
+    syl.parts.forEach((part, i) => {
+      const u = utterance(part.say.toLowerCase(), 0.7);
+      u.onstart = () => mark(i);
+      window.speechSynthesis.speak(u);
+      // A short pause between parts.
+      const gap = utterance(' ', 1);
+      gap.volume = 0;
+      window.speechSynthesis.speak(gap);
+    });
+    const whole = utterance(word, 0.6);
+    whole.onstart = () => mark(-2);
+    whole.onend = () => mark(-1);
+    window.speechSynthesis.speak(whole);
+  }
+
+  // "How to say it" box: parts with the stressed one in bold, plus a
+  // dictionary-style respelling, and buttons for normal / slow / by parts.
+  function sayItHTML(word, opts = {}) {
+    const syl = engine && engine.syllables(word);
+    const parts = syl && syl.parts.length
+      ? syl.parts.map((p) => `<span class="say-part${p.stressed ? ' stressed' : ''}">${escapeHtml(p.letters)}</span>`).join('<span class="say-dot">·</span>')
+      : '';
+    const buttons = canSpeak
+      ? `<div class="say-actions">
+          <button type="button" class="secondary-btn" data-sp="sayword" data-word="${escapeHtml(word)}">🔊 Normal</button>
+          <button type="button" class="secondary-btn" data-sp="sayslow" data-word="${escapeHtml(word)}">🐢 Slow</button>
+          ${parts ? `<button type="button" class="secondary-btn" data-sp="sayparts" data-word="${escapeHtml(word)}">🧩 By parts</button>` : ''}
+        </div>`
+      : '';
+    if (!parts && !buttons) return '';
+    return `
+      <div class="say-it">
+        ${parts && !opts.hideLetters ? `<div class="say-parts">${parts}</div>` : ''}
+        ${syl && !opts.hideLetters ? `<div class="say-respell">Say it: <b>${escapeHtml(syl.say)}</b> <span class="sp-muted">(capitals = say it stronger)</span></div>` : ''}
+        ${buttons}
+      </div>`;
   }
 
   // Shown when the browser can't talk: flash the word, then hide it.
@@ -415,11 +553,23 @@ const Spelling = (() => {
 
   function startMode(mode, customWords, title) {
     stopTower();
+    // Level word lists need the sound dictionary; start once it's loaded.
+    if (!engine && !(customWords && customWords.length)) {
+      setFinderStatus('');
+      return ensureEngine()
+        .catch(() => null)
+        .then(() => startModeNow(mode, customWords, title));
+    }
+    return startModeNow(mode, customWords, title);
+  }
+
+  function startModeNow(mode, customWords, title) {
     if (mode === 'tower') return startTower();
     session = {
       mode,
       title: title || '',
-      words: customWords && customWords.length ? customWords : pickWords(ROUND_SIZE),
+      level: data.level,
+      words: customWords && customWords.length ? customWords : pickWords(level().roundSize),
       index: 0,
       results: [],
       answered: false,
@@ -472,21 +622,24 @@ const Spelling = (() => {
         <div class="sp-card">
           <div class="sp-listen">
             <button type="button" class="sp-big-btn" data-sp="say">${canSpeak ? '🔊 Hear the word' : '👀 Peek at the word'}</button>
-            <button type="button" class="secondary-btn" data-sp="sentence">${canSpeak ? 'Hear it in a sentence' : 'Show the sentence'}</button>
+            ${canSpeak ? `<button type="button" class="secondary-btn" data-sp="sayslow" data-word="${escapeHtml(entry.word)}">🐢 Slow</button>` : ''}
+            ${canSpeak && engine && engine.syllables(entry.word) ? `<button type="button" class="secondary-btn" data-sp="sayparts" data-word="${escapeHtml(entry.word)}">🧩 By parts</button>` : ''}
+            ${level().hints ? `<button type="button" class="secondary-btn" data-sp="sentence">${canSpeak ? 'In a sentence' : 'Show the sentence'}</button>` : ''}
           </div>
           <div class="sp-peek" id="spPeek" aria-live="polite"></div>
+          ${level().showLetters ? `<p class="sp-letters">${entry.word.split('').map((c) => (c === ' ' ? '&nbsp;' : '_')).join(' ')} <span class="sp-muted">(${entry.word.replace(/ /g, '').length} letters)</span></p>` : ''}
           <p class="sp-sentence" id="spSentence" hidden></p>
           <form class="sp-answer" id="spAnswerForm">
             ${answerInput()}
             <button type="submit">Check</button>
           </form>
-          <button type="button" class="sp-link" data-sp="hint">Need a hint?</button>
+          ${level().hints ? '<button type="button" class="sp-link" data-sp="hint">Need a hint?</button>' : ''}
           <div id="spFeedback"></div>
         </div>`;
       if (canSpeak) setTimeout(() => sayWord(entry), 250);
       else peek(document.getElementById('spPeek'), entry.word);
     } else if (session.mode === 'spot') {
-      session.options = shuffle([entry.word, ...entry.wrongs.slice(0, 3)]);
+      session.options = shuffle([entry.word, ...entry.wrongs.slice(0, Math.max(1, level().spotChoices - 1))]);
       el.innerHTML = `${head}
         <div class="sp-card">
           <p class="sp-prompt">Which spelling is right?</p>
@@ -550,11 +703,11 @@ const Spelling = (() => {
       <div class="sp-feedback ${correct ? 'good' : 'bad'}">
         <div class="sp-feedback-title">${correct ? '✅ Correct!' : '❌ Not quite'}</div>
         ${correct ? `<div class="sp-word sp-word-big">${escapeHtml(entry.word)}</div>` : diffHTML(entry.word, attempt)}
+        ${sayItHTML(entry.word)}
         ${soundTips.map((t) => `<p class="sp-tip">🔈 ${t}</p>`).join('')}
         ${entry.tip ? `<p class="sp-tip">💡 ${escapeHtml(entry.tip)}</p>` : ''}
         ${added ? '<p class="sp-added">Added to your tricky words, so you will see it again.</p>' : ''}
         <div class="sp-feedback-actions">
-          ${canSpeak ? '<button type="button" class="secondary-btn" data-sp="say">🔊 Hear it</button>' : ''}
           <button type="button" class="sp-next" data-sp="next">${last ? 'See results' : 'Next word ›'}</button>
         </div>
       </div>`;
@@ -579,6 +732,17 @@ const Spelling = (() => {
     const pct = total ? Math.round((right / total) * 100) : 0;
     const msg = pct === 100 ? 'Perfect round! 🎉' : pct >= 70 ? 'Nice work!' : 'Good practice. Those words will come back soon.';
     const mode = session.mode;
+    const lvl = session.level;
+    let suggest = '';
+    if (!session.title && total >= 5) {
+      if (right / total >= LEVEL_UP_SCORE && lvl < LEVELS.length) {
+        suggest = `<p class="sp-level-tip">🚀 That was easy for you. Ready for level ${lvl + 1} (${escapeHtml(LEVELS[lvl].name)})?</p>
+          <button type="button" class="sp-next" data-sp="setlevel" data-level="${lvl + 1}" data-mode="${mode}">Go to level ${lvl + 1}</button>`;
+      } else if (right / total < LEVEL_DOWN_SCORE && lvl > 1) {
+        suggest = `<p class="sp-level-tip">That was a hard round. Want to try level ${lvl - 1} (${escapeHtml(LEVELS[lvl - 2].name)}) for a bit?</p>
+          <button type="button" class="secondary-btn" data-sp="setlevel" data-level="${lvl - 1}" data-mode="${mode}">Go to level ${lvl - 1}</button>`;
+      }
+    }
     playEl().innerHTML = `
       <div class="sp-play-head">
         <button type="button" class="secondary-btn sp-quit" data-sp="quit">‹ Back</button>
@@ -593,9 +757,10 @@ const Spelling = (() => {
           <ul class="sp-missed">
             ${missed.map((r) => `<li><b>${escapeHtml(r.word)}</b>${r.attempt ? ` <span class="sp-muted">(you wrote ${escapeHtml(r.attempt)})</span>` : ''}</li>`).join('')}
           </ul>` : ''}
+        ${suggest ? `<div class="sp-level-suggest">${suggest}</div>` : ''}
         <div class="sp-feedback-actions">
           <button type="button" class="secondary-btn" data-sp="quit">Done</button>
-          <button type="button" class="sp-next" data-sp="again" data-mode="${mode}">Play again</button>
+          <button type="button" class="${suggest ? 'secondary-btn' : 'sp-next'}" data-sp="again" data-mode="${mode}">Play again</button>
         </div>
       </div>`;
     session = null;
@@ -603,18 +768,23 @@ const Spelling = (() => {
   }
 
   // ---------- Tower game ----------
-  const TOWER_LIVES = 3;
   const BLOCK_COLORS = ['#4f46e5', '#7c3aed', '#0891b2', '#16a34a', '#ea580c', '#db2777'];
 
+  // Seconds per word: starts at the level's towerStart and gets faster by
+  // the same step each block, reaching towerFastest at 15 blocks.
   function towerTime(height) {
-    return Math.max(6, 18 - height * 0.75); // seconds per word
+    const l = LEVELS[tower.level - 1];
+    const step = (l.towerStart - l.towerFastest) / 15;
+    return Math.max(l.towerFastest, l.towerStart - height * step);
   }
 
   function startTower() {
     session = null;
     tower = {
       blocks: [],
-      lives: TOWER_LIVES,
+      lives: level().lives,
+      maxLives: level().lives,
+      level: data.level,
       queue: pickWords(40),
       qi: 0,
       entry: null,
@@ -639,7 +809,7 @@ const Spelling = (() => {
         <div class="tower-timer"><div class="tower-timer-fill" id="towerTimerFill"></div></div>
         <div class="sp-listen">
           <button type="button" class="sp-big-btn" data-sp="tsay">${canSpeak ? '🔊 Hear again' : '👀 Peek'}</button>
-          <button type="button" class="secondary-btn" data-sp="tsentence">Sentence hint</button>
+          ${level().hints ? '<button type="button" class="secondary-btn" data-sp="tsentence">Sentence hint</button>' : ''}
         </div>
         <div class="sp-peek" id="spPeek" aria-live="polite"></div>
         <p class="sp-sentence" id="towerSentence" hidden></p>
@@ -668,7 +838,7 @@ const Spelling = (() => {
       .join('');
     tower.blocks.forEach((b) => (b.fresh = false));
     document.getElementById('towerHeight').textContent = tower.blocks.length;
-    document.getElementById('towerLives').textContent = '❤️'.repeat(tower.lives) + '🤍'.repeat(TOWER_LIVES - tower.lives);
+    document.getElementById('towerLives').textContent = '❤️'.repeat(tower.lives) + '🤍'.repeat(tower.maxLives - tower.lives);
   }
 
   function nextTowerWord() {
@@ -767,6 +937,8 @@ const Spelling = (() => {
       <div class="sp-feedback">
         <div class="sp-feedback-title">Game over</div>
         <p>Highest tower: <b>${height}</b> block${height === 1 ? '' : 's'}${isRecord ? ' — new record! 🏆' : ` (best: ${best})`}</p>
+        ${height >= 15 && tower.level < LEVELS.length ? `<p class="sp-level-tip">🚀 15+ blocks! Try level ${tower.level + 1} for a faster tower.</p>
+          <button type="button" class="sp-next" data-sp="setlevel" data-level="${tower.level + 1}" data-mode="tower">Go to level ${tower.level + 1}</button>` : ''}
         <div class="sp-feedback-actions">
           <button type="button" class="secondary-btn" data-sp="quit">Done</button>
           <button type="button" class="sp-next" data-sp="again" data-mode="tower">Play again</button>
@@ -965,7 +1137,7 @@ const Spelling = (() => {
       return;
     }
     lastQuery = query;
-    const results = engine.find(query, { limit: 5, user: data.sound });
+    const results = engine.find(query, { limit: 5, user: data.sound, style: data.style });
     if (!results.length) {
       list.innerHTML = '<li class="sp-muted">No match yet. Try typing more of the word.</li>';
       return;
@@ -979,7 +1151,7 @@ const Spelling = (() => {
           return `
           <li>
             <button type="button" class="sound-result" data-sp="pick" data-word="${escapeHtml(r.word)}">
-              <span class="sound-result-word">${escapeHtml(displayWord(r.word))}</span>
+              <span class="sound-result-word">${escapeHtml(displayWord(r.word))}${r.variant ? ` <span class="sound-badge">${r.variant === 'us' ? 'US' : 'UK'}</span>` : ''}</span>
               <span class="sound-bar"><span style="width:${pct}%"></span></span>
               <span class="sound-pct">${r.chance < 0.01 ? '<1' : pct}%</span>
             </button>
@@ -1004,6 +1176,7 @@ const Spelling = (() => {
     }
     if (canSpeak) speak(word);
     const shown = displayWord(word);
+    const variant = engine.variantOf(word);
     const anyWrong = info.sounds.some((r) => !r.ok);
     const rows = info.sounds
       .map((r) => `
@@ -1024,11 +1197,12 @@ const Spelling = (() => {
         <div class="sound-explain-head">
           <div class="sp-word sp-word-big">${escapeHtml(shown)}</div>
           <div class="sp-feedback-actions">
-            ${canSpeak ? `<button type="button" class="secondary-btn" data-sp="sayword" data-word="${escapeHtml(word)}">🔊 Hear</button>` : ''}
             <button type="button" class="secondary-btn" data-sp="copy" data-word="${escapeHtml(shown)}">Copy</button>
             ${isMine(word) ? '' : `<button type="button" class="secondary-btn" data-sp="addtricky" data-word="${escapeHtml(shown)}">+ Tricky words</button>`}
           </div>
         </div>
+        ${variant ? `<p class="sp-muted sound-variant">${variant === 'us' ? 'American spelling' : 'British spelling'}</p>` : ''}
+        ${sayItHTML(word)}
         <h4 class="sp-subhead">Sound by sound</h4>
         <table class="sound-table">
           <thead><tr><th>Sound</th><th>${typed ? 'You wrote' : ''}</th><th>Spelled</th></tr></thead>
@@ -1086,7 +1260,7 @@ const Spelling = (() => {
     if (!engine) return;
     const p = data.sound.patterns[key];
     if (!p) return;
-    const words = shuffle([...new Set([...p.words, ...engine.practiceWords(p.unit, p.right, 12, p.words)])].slice(0, ROUND_SIZE));
+    const words = shuffle([...new Set([...p.words, ...engine.practiceWords(p.unit, p.right, 12, p.words)])].slice(0, level().roundSize));
     if (!words.length) return showWarning('No practice words found for that pattern yet.');
     startMode('hear', words.map(displayWord), `Practise "${p.right}" for the ${engine.soundName(p.unit)} sound`);
   }
@@ -1100,6 +1274,77 @@ const Spelling = (() => {
     }
   }
 
+  let levelCacheKey = '';
+  let levelCacheList = [];
+  function levelCache() {
+    const key = data.level + data.style;
+    if (key !== levelCacheKey) {
+      levelCacheKey = key;
+      levelCacheList = engine ? engine.levelWords(data.level, data.style).slice(0, LEVEL_POOL_SIZE) : [];
+    }
+    return levelCacheList;
+  }
+
+  // ---------- Level picker ----------
+  function levelSummary(l) {
+    return [
+      l.blurb,
+      `${l.roundSize} words a round`,
+      `Tower: ${l.towerStart}s per word, ${l.lives} ${l.lives === 1 ? 'life' : 'lives'}`,
+      `Spot it: ${l.spotChoices} choices`,
+      l.hints ? 'Hints on' : 'No hints',
+    ].concat(l.showLetters ? ['Letter count shown'] : []);
+  }
+
+  function renderLevels() {
+    const el = document.getElementById('spellingLevels');
+    if (!el) return;
+    const l = level();
+    el.innerHTML = `
+      <div class="sp-level-row" role="radiogroup" aria-label="Level">
+        ${LEVELS.map((lv, i) => `
+          <button type="button" class="sp-level${i + 1 === data.level ? ' active' : ''}" role="radio" aria-checked="${i + 1 === data.level}" data-sp="setlevel" data-level="${i + 1}">
+            <span class="sp-level-num">${i + 1}</span>
+            <span class="sp-level-name">${escapeHtml(lv.name)}</span>
+          </button>`).join('')}
+      </div>
+      <p class="sp-level-desc">${levelSummary(l).map(escapeHtml).join(' · ')}</p>`;
+  }
+
+  function setLevel(n, thenMode) {
+    data.level = Math.min(LEVELS.length, Math.max(1, n));
+    persist();
+    renderLevels();
+    if (thenMode) startMode(thenMode);
+  }
+
+  // ---------- Voice settings ----------
+  function renderVoices() {
+    const select = document.getElementById('spVoice');
+    if (!select) return;
+    const voices = englishVoices();
+    const opts = ['<option value="">Device default</option>'].concat(
+      voices.map((v) => `<option value="${escapeHtml(v.voiceURI)}"${v.voiceURI === data.voice ? ' selected' : ''}>${escapeHtml(accentOf(v.lang))} — ${escapeHtml(v.name)}</option>`)
+    );
+    select.innerHTML = opts.join('');
+    document.getElementById('spVoiceNote').textContent = !canSpeak
+      ? 'This browser cannot speak.'
+      : voices.length
+        ? `${voices.length} English voice${voices.length === 1 ? '' : 's'} on this device. Want another accent? Add voices in your phone's text-to-speech settings.`
+        : 'No English voices found yet. They can take a moment to load, or add one in your phone\'s text-to-speech settings.';
+    document.getElementById('spRate').value = data.rate;
+    document.getElementById('spRateValue').textContent = rateLabel(data.rate);
+    document.getElementById('spStyle').value = data.style;
+  }
+
+  function rateLabel(r) {
+    if (r < 0.65) return 'Very slow';
+    if (r < 0.8) return 'Slow';
+    if (r < 0.95) return 'A bit slow';
+    if (r < 1.1) return 'Normal';
+    return 'Fast';
+  }
+
   // ---------- Events ----------
   function onClick(e) {
     const btn = e.target.closest('[data-sp]');
@@ -1110,6 +1355,10 @@ const Spelling = (() => {
     if (action === 'next') return next();
     if (action === 'remove') return removeWord(btn.dataset.id);
     if (action === 'sayword') return speak(btn.dataset.word);
+    if (action === 'sayslow') return speak(btn.dataset.word, 0.55);
+    if (action === 'sayparts') return sayByParts(btn.dataset.word, btn.closest('.say-it'));
+    if (action === 'setlevel') return setLevel(Number(btn.dataset.level), btn.dataset.mode);
+    if (action === 'testvoice') return speak('Hello! Necessary. Definitely. Restaurant.');
     if (action === 'pick') return pickWord(btn.dataset.word);
     if (action === 'copy') return copyText(btn.dataset.word);
     if (action === 'pattern') return practisePattern(btn.dataset.key);
@@ -1234,6 +1483,30 @@ const Spelling = (() => {
     });
 
     document.getElementById('spellingSpeechNote').hidden = canSpeak;
+    if (canSpeak) {
+      renderVoices();
+      // Voices load late on some browsers.
+      window.speechSynthesis.addEventListener('voiceschanged', renderVoices);
+    }
+    document.getElementById('spVoice').addEventListener('change', (e) => {
+      data.voice = e.target.value;
+      persist();
+      speak('This is how I sound.');
+    });
+    document.getElementById('spRate').addEventListener('input', (e) => {
+      data.rate = Number(e.target.value);
+      document.getElementById('spRateValue').textContent = rateLabel(data.rate);
+    });
+    document.getElementById('spRate').addEventListener('change', () => {
+      persist();
+      speak('Necessary');
+    });
+    document.getElementById('spStyle').addEventListener('change', (e) => {
+      data.style = e.target.value;
+      persist();
+      if (lastQuery) runFind();
+    });
+    renderLevels();
     renderModes();
     renderHome();
   }
@@ -1268,6 +1541,9 @@ const Spelling = (() => {
     importData(raw) {
       data = normalize(raw);
       lastLearned = '';
+      levelCacheKey = '';
+      renderLevels();
+      renderVoices();
       persist();
       quit();
       renderAll();

@@ -3,13 +3,23 @@
 // "how is each sound spelled" table used by public/sound-engine.js.
 //
 // Usage:
-//   node scripts/build-sound-data.js <cmudict.dict> <en_50k.txt>
+//   node scripts/build-sound-data.js <cmudict.dict> <en_50k.txt> \
+//     [--us en.dic en.aff] [--gb en-GB.dic en-GB.aff] [--bad badwords.txt]
 //
 // Sources (download them first):
 //   CMU Pronouncing Dictionary (BSD-style licence)
 //     https://raw.githubusercontent.com/cmusphinx/cmudict/master/cmudict.dict
 //   FrequencyWords by Hermit Dave (content CC BY-SA 4.0)
 //     https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/en/en_50k.txt
+//   Optional, to mark which words are fine for practice:
+//   Hunspell en_US and en_GB dictionaries (SCOWL, permissive licence)
+//     https://github.com/wooorm/dictionaries/tree/main/dictionaries/en
+//     https://github.com/wooorm/dictionaries/tree/main/dictionaries/en-GB
+//     Names are capitalised there, so lowercase-only words are real words,
+//     and comparing the two tells us US-only (color) and UK-only (colour).
+//   List of Dirty, Naughty, Obscene and Otherwise Bad Words (CC BY 4.0)
+//     https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words
+//     Used only to keep these words out of practice rounds.
 //
 // How it learns: every word is a row of sounds (phonemes) and a row of
 // letters. We split the letters into chunks, one chunk per sound, so that
@@ -22,10 +32,100 @@
 const fs = require('fs');
 const path = require('path');
 
-const [cmuPath, freqPath] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const opts = {};
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--us' || args[i] === '--gb') {
+    opts[args[i].slice(2)] = [args[i + 1], args[i + 2]];
+    i += 2;
+  } else if (args[i] === '--bad') {
+    opts.bad = args[++i];
+  } else {
+    (opts.files = opts.files || []).push(args[i]);
+  }
+}
+const [cmuPath, freqPath] = opts.files || [];
 if (!cmuPath || !freqPath) {
-  console.error('Usage: node scripts/build-sound-data.js <cmudict.dict> <en_50k.txt>');
+  console.error('Usage: node scripts/build-sound-data.js <cmudict.dict> <en_50k.txt> [--us dic aff] [--gb dic aff] [--bad file]');
   process.exit(1);
+}
+
+// ---------- Hunspell: expand "color/AEGDS" into color, colors, colored... ----------
+// Returns Map(lowercase form -> true if it comes from a lowercase entry).
+function hunspellWords(dicPath, affPath) {
+  const rules = {};
+  fs.readFileSync(affPath, 'utf8').split('\n').forEach((line) => {
+    const m = line.trim().split(/\s+/);
+    if (m[0] !== 'SFX' && m[0] !== 'PFX') return;
+    const [kind, flag] = m;
+    if (m.length === 4 && /^[YN]$/.test(m[2])) {
+      rules[flag] = { kind, cross: m[2] === 'Y', list: [] };
+    } else if (rules[flag] && m.length >= 5) {
+      const strip = m[2] === '0' ? '' : m[2];
+      const add = m[3].split('/')[0].replace(/^0$/, '');
+      const cond = m[4] === '.' ? null : new RegExp(kind === 'SFX' ? `${m[4]}$` : `^${m[4]}`);
+      rules[flag].list.push({ strip, add, cond });
+    }
+  });
+  const apply = (word, rule) => {
+    const out = [];
+    for (const r of rule.list) {
+      if (r.cond && !r.cond.test(word)) continue;
+      if (rule.kind === 'SFX') {
+        if (r.strip && !word.endsWith(r.strip)) continue;
+        out.push(word.slice(0, word.length - r.strip.length) + r.add);
+      } else {
+        if (r.strip && !word.startsWith(r.strip)) continue;
+        out.push(r.add + word.slice(r.strip.length));
+      }
+    }
+    return out;
+  };
+  const forms = new Map();
+  const addForm = (w, lower) => {
+    const k = w.toLowerCase();
+    if (!/^[a-z]+$/.test(k)) return;
+    forms.set(k, forms.get(k) || lower);
+  };
+  fs.readFileSync(dicPath, 'utf8').split('\n').slice(1).forEach((line) => {
+    const [word, flagStr = ''] = line.trim().split('/');
+    if (!word) return;
+    const lower = word === word.toLowerCase();
+    const flags = [...flagStr].map((f) => rules[f]).filter(Boolean);
+    addForm(word, lower);
+    const sfx = flags.filter((r) => r.kind === 'SFX');
+    const pfx = flags.filter((r) => r.kind === 'PFX');
+    const suffixed = sfx.flatMap((r) => apply(word, r).map((w) => ({ w, cross: r.cross })));
+    suffixed.forEach(({ w }) => addForm(w, lower));
+    pfx.forEach((r) => {
+      apply(word, r).forEach((w) => addForm(w, lower));
+      if (r.cross) suffixed.filter((x) => x.cross).forEach(({ w }) => apply(w, r).forEach((x) => addForm(x, lower)));
+    });
+  });
+  return forms;
+}
+
+const us = opts.us ? hunspellWords(...opts.us) : null;
+const gb = opts.gb ? hunspellWords(...opts.gb) : null;
+const bad = new Set(
+  opts.bad ? fs.readFileSync(opts.bad, 'utf8').split('\n').map((w) => w.trim().toLowerCase()).filter((w) => /^[a-z]+$/.test(w)) : []
+);
+// Mild words the list above doesn't cover, still not wanted in practice.
+['piss', 'pissed', 'pissing', 'crap', 'crappy', 'damn', 'damned', 'dammit', 'bloody', 'bastard', 'bastards', 'bitch', 'bitches', 'slut', 'whore', 'hell', 'sexy', 'boobs', 'dick', 'dicks', 'cock', 'prick', 'arse', 'arsehole', 'wanker', 'twat', 'bollocks', 'screw', 'screwed', 'horny', 'nazi', 'nazis', 'kill', 'killer', 'killing', 'murder', 'rape', 'raped', 'drunk', 'drugs', 'cocaine', 'heroin', 'suicide']
+  .forEach((w) => bad.add(w));
+if (us) console.log(`Hunspell forms: US ${us.size}, UK ${gb ? gb.size : 0}; bad words ${bad.size}`);
+
+// Flags per word: p = fine for practice (a real lowercase word, not a name or
+// swear word), u = US-only spelling, g = UK-only spelling.
+function flagsFor(word) {
+  if (!us && !gb) return 'p';
+  const inUs = us && us.get(word) === true;
+  const inGb = gb && gb.get(word) === true;
+  let f = '';
+  if ((inUs || inGb) && !bad.has(word) && word.length >= 3) f += 'p';
+  if (us && gb && inUs && !inGb) f += 'u';
+  if (us && gb && inGb && !inUs) f += 'g';
+  return f;
 }
 
 const MAX_WORDS = 30000;
@@ -67,6 +167,8 @@ fs.readFileSync(cmuPath, 'utf8')
     if (!/^[a-z]+$/.test(word)) return;
     const units = phs.map(unitOf);
     if (units.some((u) => !u)) return;
+    // Which vowel (counting vowels only) carries the main stress: NEC-es-sar-y.
+    units.primary = phs.filter((ph) => /\d$/.test(ph)).findIndex((ph) => ph.endsWith('1'));
     if (!prons.has(word)) prons.set(word, []);
     const list = prons.get(word);
     if (list.length < 2) list.push(units);
@@ -219,12 +321,47 @@ for (const [unit, m] of counts) {
   if (entries.length) outTable[unit] = Object.fromEntries(entries);
 }
 
+// ---------- Difficulty levels ----------
+// difficulty = surprise + 0.7 × rarity
+//   surprise: −log P(spelling | sounds), summed over the word's sounds. Long
+//             words and unusual spellings ("colonel") score high.
+//   rarity:   ln(rank + 20) − ln 20. Common words score near 0.
+// Practice words among the most common LEVEL_POOL are split into 5 equal
+// groups: level 1 is the easiest fifth, level 5 the hardest.
+const LEVEL_POOL = 20000;
+const RARITY_WEIGHT = 0.7;
+const totals = new Map([...counts].map(([u, m]) => [u, [...m.values()].reduce((a, b) => a + b, 0)]));
+words.forEach((w, rank) => {
+  if (!w.alignment) return;
+  const surprise = w.alignment.reduce((sum, [unit, chunk]) => {
+    const c = (counts.get(unit) && counts.get(unit).get(chunk)) || 0.5;
+    return sum - Math.log(c / (totals.get(unit) || 1));
+  }, 0);
+  w.rank = rank;
+  w.difficulty = surprise + RARITY_WEIGHT * (Math.log(rank + 20) - Math.log(20));
+});
+const levelled = words
+  .filter((w) => w.alignment && w.rank < LEVEL_POOL && flagsFor(w.word).includes('p'))
+  .sort((a, b) => a.difficulty - b.difficulty);
+levelled.forEach((w, i) => (w.level = 1 + Math.floor((i * 5) / levelled.length)));
+
 const lines = words
   .filter((w) => w.alignment)
-  .map((w) => `${w.word} ${w.prons.map((p) => p.map((u) => codeOf.get(u)).join('')).join(',')}`);
+  .map((w) => {
+    const pr = w.prons.map((p) => p.map((u) => codeOf.get(u)).join('') + (p.primary >= 0 ? ':' + p.primary : '')).join(',');
+    const flags = flagsFor(w.word) + (w.level || '');
+    return `${w.word} ${pr}${flags ? ' ' + flags : ''}`;
+  });
+const flagCounts = { p: 0, u: 0, g: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+lines.forEach((l) => (l.split(' ')[2] || '').split('').forEach((f) => flagCounts[f]++));
+console.log(`Practice words: ${flagCounts.p}, US-only: ${flagCounts.u}, UK-only: ${flagCounts.g}`);
+for (let l = 1; l <= 5; l++) {
+  const sample = levelled.filter((w) => w.level === l);
+  console.log(`Level ${l} (${sample.length}):`, sample.filter((_, i) => i % Math.floor(sample.length / 12) === 0).map((w) => w.word).join(' '));
+}
 
 const out = {
-  about: 'Generated by scripts/build-sound-data.js from the CMU Pronouncing Dictionary (CMU, BSD-style licence) and FrequencyWords by Hermit Dave (CC BY-SA 4.0). Words are sorted from most to least common.',
+  about: 'Generated by scripts/build-sound-data.js from the CMU Pronouncing Dictionary (CMU, BSD-style licence) and FrequencyWords by Hermit Dave (CC BY-SA 4.0), with word flags from the Hunspell en_US/en_GB dictionaries (SCOWL) and the LDNOOBW list (CC BY 4.0). Words are sorted from most to least common. Line format: word sounds[:stress][,sounds[:stress]] [flags: p practice, u US-only, g UK-only, 1-5 level].',
   units: unitList,
   pairs: [...PAIR_UNITS],
   table: outTable,

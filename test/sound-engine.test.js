@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const SoundEngine = require('../public/sound-engine.js');
 
 const engine = SoundEngine.create(require('../public/sound-data.json'));
-const top = (q, user) => engine.find(q, { limit: 3, user })[0].word;
+const top = (q, user, style) => engine.find(q, { limit: 3, user, style })[0].word;
 
 test('finds the word from a spelling that sounds right', () => {
   const cases = {
@@ -60,4 +60,30 @@ test('learns your habits and finds practice words for them', () => {
   const after = engine.find('sity', { limit: 3, user })[0];
   assert.strictEqual(after.word, 'city');
   assert.ok(after.chance >= before.chance);
+});
+
+test('splits words into spoken parts with the stress marked', () => {
+  const show = (w) => {
+    const s = engine.syllables(w);
+    return s.parts.map((p) => (p.stressed ? p.letters.toUpperCase() : p.letters)).join('·') + ' ' + s.say;
+  };
+  assert.strictEqual(show('necessary'), 'NEC·es·sar·y NESS-uh-sair-ee');
+  assert.strictEqual(show('because'), 'be·CAUSE bih-KAWZ');
+  assert.strictEqual(show('hospital'), 'HOS·pit·al HOSS-pit-uhl');
+  assert.strictEqual(show('create'), 'cre·ATE kree-AYT');
+});
+
+test('gives every practice word one of five levels', () => {
+  for (let l = 1; l <= 5; l++) assert.ok(engine.levelWords(l).length > 1000, `level ${l}`);
+  assert.ok(engine.levelOf('cat') < engine.levelOf('necessary'));
+  assert.strictEqual(engine.levelOf('david'), 0); // names are left out
+});
+
+test('prefers your spelling style (colour vs color)', () => {
+  assert.strictEqual(engine.variantOf('colour'), 'gb');
+  assert.strictEqual(engine.variantOf('color'), 'us');
+  assert.strictEqual(top('kolor', null, 'gb'), 'colour');
+  assert.strictEqual(top('kolor', null, 'us'), 'color');
+  assert.strictEqual(top('fayvorit', null, 'gb'), 'favourite');
+  assert.strictEqual(top('senter', null, 'us'), 'center');
 });

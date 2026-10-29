@@ -224,7 +224,41 @@
         </p>
 
         <h2 class="section-heading">Practise</h2>
+        <div id="spellingLevels"></div>
         <div class="sp-modes" id="spellingModes"></div>
+        <details class="google-setup sp-level-help">
+          <summary>How levels work</summary>
+          <p>
+            Every word gets a difficulty score: <b>surprise + 0.7 × rarity</b>.
+            <i>Surprise</i> is how unusual the spelling is for the way the word
+            sounds (like "colonel"), and <i>rarity</i> is how uncommon the word is.
+            The words are split into five equal groups, from easiest to hardest.
+          </p>
+          <p>
+            Higher levels also give you less time in the tower, fewer lives, more
+            choices in Spot it, and fewer hints. Your tricky words always come up,
+            whatever the level. Score 90% or more in a round and you'll be offered
+            the next level.
+          </p>
+        </details>
+
+        <details class="google-setup sp-voice-settings">
+          <summary>🔊 Voice &amp; spelling settings</summary>
+          <label class="sp-setting">Voice
+            <select id="spVoice"></select>
+          </label>
+          <p class="sp-muted sp-small" id="spVoiceNote"></p>
+          <label class="sp-setting">Speed <span class="sp-muted" id="spRateValue"></span>
+            <input type="range" id="spRate" min="0.5" max="1.2" step="0.05">
+          </label>
+          <label class="sp-setting">Spelling style
+            <select id="spStyle">
+              <option value="gb">British / South African (colour, realise)</option>
+              <option value="us">American (color, realize)</option>
+            </select>
+          </label>
+          <button type="button" class="secondary-btn" data-sp="testvoice">Test the voice</button>
+        </details>
 
         <h2 class="section-heading">Your spelling habits</h2>
         <p class="sp-muted sp-intro">Sounds you often spell a different way. Practise the pattern, not just one word.</p>

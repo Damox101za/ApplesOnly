@@ -1617,3 +1617,177 @@ button {
 #soundHabits {
   margin-bottom: 0.5rem;
 }
+
+/* ---------- Levels ---------- */
+.sp-level-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.35rem;
+}
+
+.sp-level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.45rem 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.sp-level-num {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.sp-level-name {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.sp-level.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.sp-level.active .sp-level-name {
+  color: #e0e7ff;
+}
+
+.sp-level-desc {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 0.5rem 0 0.75rem;
+}
+
+.sp-level-help,
+.sp-voice-settings {
+  margin-top: 0.75rem;
+}
+
+.sp-level-help p {
+  font-size: 0.88rem;
+}
+
+.sp-level-suggest {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: #eef2ff;
+}
+
+.sp-level-tip {
+  margin: 0 0 0.5rem;
+}
+
+.sp-letters {
+  text-align: center;
+  font-size: 1.3rem;
+  letter-spacing: 0.15em;
+  margin: 0.75rem 0 0;
+}
+
+.sp-letters .sp-muted {
+  font-size: 0.8rem;
+  letter-spacing: 0;
+}
+
+/* ---------- Voice settings ---------- */
+.sp-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+}
+
+.sp-setting select,
+.sp-setting input[type="range"] {
+  width: 100%;
+  font: inherit;
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.sp-small {
+  font-size: 0.8rem;
+  margin: 0.3rem 0 0;
+}
+
+.sp-voice-settings .secondary-btn {
+  margin-top: 0.75rem;
+}
+
+/* ---------- Say it ---------- */
+.say-it {
+  margin-top: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.say-parts {
+  font-size: 1.4rem;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.say-part {
+  padding: 0 0.1rem;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.say-part.stressed {
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.say-part.speaking {
+  background: #fde68a;
+}
+
+.say-dot {
+  color: var(--muted);
+  padding: 0 0.15rem;
+}
+
+.say-respell {
+  text-align: center;
+  font-size: 0.9rem;
+  margin-top: 0.25rem;
+}
+
+.say-respell .sp-muted {
+  font-size: 0.75rem;
+}
+
+.say-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+.sound-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: var(--border);
+  color: var(--muted);
+  vertical-align: middle;
+}
+
+.sound-variant {
+  font-size: 0.8rem;
+  margin: 0.25rem 0 0;
+}

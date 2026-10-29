@@ -34,6 +34,7 @@
   const COST_EXTRA_LETTER = -8; // a letter that belongs to no sound
   const COST_DROPPED_SOUND = -8; // a sound with no letters
   const COST_TYPO_EDIT = -3.5; // per letter edit, for plain typos ("teh")
+  const STYLE_COST = Math.log(0.05); // US spelling when you use UK spelling (or the other way)
 
   const SOUND_NAMES = {
     AA: 'o as in "hot"', AE: 'a as in "cat"', AH: 'u as in "cup"', AO: 'aw as in "saw"',
@@ -118,12 +119,39 @@
       topChunk.set(unit, [best[0], best[1] / total]);
     });
 
+    // Line format: word sounds[:stress][,sounds[:stress]] [flags]
+    // flags: p = fine for practice, u = US-only, g = UK-only, 1-5 = level.
     const words = raw.words.split('\n').map((line, rank) => {
-      const [word, codes] = line.split(' ');
-      const prons = codes.split(',').map((c) => [...c].map((ch) => codeToUnit.get(ch)));
-      return { word, rank, prons, logPrior: -Math.log(rank + 20) };
+      const [word, codes, flags = ''] = line.split(' ');
+      const prons = codes.split(',').map((c) => {
+        const [sounds, stress] = c.split(':');
+        const units = [...sounds].map((ch) => codeToUnit.get(ch));
+        units.primary = stress === undefined ? -1 : Number(stress);
+        return units;
+      });
+      const level = Number((flags.match(/[1-5]/) || [0])[0]);
+      const variant = flags.includes('u') ? 'us' : flags.includes('g') ? 'gb' : '';
+      return { word, rank, prons, logPrior: -Math.log(rank + 20), practice: flags.includes('p'), level, variant };
     });
     const byWord = new Map(words.map((w) => [w.word, w]));
+
+    // UK and US spellings of the same word: colour/color, realise/realize,
+    // centre/center, catalogue/catalog, defence/defense, travelled/traveled.
+    const TWIN_RULES = [
+      [/or(s|ed|ing|ful|ite)?$/, 'our$1'], [/our(s|ed|ing|ful|ite)?$/, 'or$1'],
+      [/iz(e|es|ed|ing|ation|ations)$/, 'is$1'], [/is(e|es|ed|ing|ation|ations)$/, 'iz$1'],
+      [/yz(e|es|ed|ing)$/, 'ys$1'], [/ys(e|es|ed|ing)$/, 'yz$1'],
+      [/er(s)?$/, 're$1'], [/re(s)?$/, 'er$1'], [/og(s)?$/, 'ogue$1'], [/ogue(s)?$/, 'og$1'],
+      [/ense(s)?$/, 'ence$1'], [/ence(s)?$/, 'ense$1'], [/l(ed|ing|er|ers)$/, 'll$1'], [/ll(ed|ing|er|ers)$/, 'l$1'],
+    ];
+    function twinOf(word, style) {
+      for (const [re, to] of TWIN_RULES) {
+        if (!re.test(word)) continue;
+        const t = byWord.get(word.replace(re, to));
+        if (t && t.variant === style) return t;
+      }
+      return null;
+    }
 
     function pGeneral(unit, chunk) {
       const m = prob.get(unit);
@@ -232,13 +260,28 @@
       if (!typed) return [];
       const limit = opts.limit || 6;
       const user = opts.user || null;
+      const style = opts.style || ''; // 'gb' or 'us': the other spelling ranks lower
       const scored = [];
       for (const entry of words) {
         if (!plausible(typed, entry)) continue;
         const c = channel(typed, entry, user);
         if (c.score === -Infinity) continue;
-        scored.push({ word: entry.word, score: entry.logPrior + c.score, channel: c.score, prior: entry.logPrior });
+        const raw = entry.logPrior + c.score;
+        const other = style && entry.variant && entry.variant !== style;
+        const twin = other ? twinOf(entry.word, style) : null;
+        // A US word with a UK twin (or the other way) hands its match to
+        // the twin: "kolor" means colour for UK users, color for US users.
+        if (twin) scored.push({ word: twin.word, score: raw, variant: twin.variant });
+        else scored.push({ word: entry.word, score: raw + (other ? STYLE_COST : 0), variant: entry.variant });
       }
+      // Merge duplicates (a twin found both ways) by adding their chances.
+      const merged = new Map();
+      scored.forEach((r) => {
+        const prev = merged.get(r.word);
+        merged.set(r.word, prev ? Object.assign(prev, { score: logaddexp(prev.score, r.score) }) : r);
+      });
+      scored.length = 0;
+      scored.push(...merged.values());
       scored.sort((a, b) => b.score - a.score);
       const top = scored.slice(0, Math.max(limit, 10));
       // Turn scores into "how sure" percentages over the top matches (the
@@ -249,6 +292,7 @@
         word: r.word,
         chance: Math.exp(r.score - max) / z,
         exact: r.word === typed,
+        variant: r.variant,
       }));
     }
 
@@ -432,6 +476,152 @@
       return [...head, { text: rest, kind: 'base', note: '' }, ...tail];
     }
 
+    // ---------- Syllables and "say it" respelling ----------
+    // Splits a word into spoken parts (nec·es·sar·y) using its sounds, and
+    // writes each part the way it sounds (NESS-uh-sair-ee), like a dictionary.
+    const isVowel = (u) => /[01]$/.test(u);
+    const SHORT_STRESSED = new Set(['AE1', 'EH1', 'IH1', 'AA1', 'AH1', 'UH1']);
+    const ONSET_2 = new Set(['P R', 'B R', 'T R', 'D R', 'K R', 'G R', 'F R', 'TH R', 'SH R', 'P L', 'B L', 'K L', 'G L', 'F L', 'S L',
+      'S P', 'S T', 'S K', 'S M', 'S N', 'S W', 'T W', 'K W', 'D W', 'G W']);
+    const CONS_SAY = { B: 'b', CH: 'ch', D: 'd', DH: 'th', F: 'f', G: 'g', HH: 'h', JH: 'j', K: 'k', L: 'l', M: 'm', N: 'n',
+      NG: 'ng', P: 'p', R: 'r', S: 's', SH: 'sh', T: 't', TH: 'th', V: 'v', W: 'w', Y: 'y', Z: 'z', ZH: 'zh' };
+    const VOWEL_SAY = { // [open syllable, closed syllable]
+      AA: ['ah', 'o'], AE: ['a', 'a'], AH: ['uh', 'u'], AO: ['aw', 'aw'], AW: ['ow', 'ow'], AY: ['eye', 'y'],
+      EH: ['eh', 'e'], ER: ['ur', 'ur'], EY: ['ay', 'ay'], IH: ['ih', 'i'], IY: ['ee', 'ee'], OW: ['oh', 'oh'],
+      OY: ['oy', 'oy'], UH: ['uu', 'uu'], UW: ['oo', 'oo'],
+    };
+    const R_SAY = { AA: 'ar', AE: 'arr', AH: 'ur', AO: 'or', AW: 'owr', AY: 'ire', EH: 'air', EY: 'air', IH: 'eer',
+      IY: 'eer', OW: 'or', UH: 'oor', UW: 'oor' };
+
+    function sayPart(units, stressed) {
+      const v = units.findIndex(isVowel);
+      if (v === -1) return units.map((u) => CONS_SAY[u] || '').join('');
+      const onset = units.slice(0, v).map((u) => CONS_SAY[u] || '');
+      let coda = units.slice(v + 1);
+      const vowel = units[v].replace(/[01]$/, '');
+      let middle;
+      if (coda[0] === 'R' && R_SAY[vowel]) {
+        middle = R_SAY[vowel];
+        coda = coda.slice(1);
+      } else if (units[v] === 'AH0' || units[v] === 'ER0') {
+        middle = units[v] === 'AH0' ? 'uh' : 'er';
+      } else {
+        const [open, closed] = VOWEL_SAY[vowel] || ['', ''];
+        middle = coda.length ? closed : open;
+        if (vowel === 'AY' && !onset.length) middle = 'eye';
+      }
+      let codaSay = coda.map((u) => CONS_SAY[u] || '').join('');
+      // Make short vowels read right: "NESS" not "NES", "byke" for bike.
+      if (codaSay === 's' && /^(e|i|a|u|o)$/.test(middle)) codaSay = 'ss';
+      if (vowel === 'AY' && middle === 'y' && coda.length === 1) codaSay += 'e';
+      let out = onset.join('') + middle + codaSay;
+      out = out.replace(/g(?=[eiy])/g, 'gh');
+      return stressed ? out.toUpperCase() : out;
+    }
+
+    function syllables(word) {
+      const entry = byWord.get(cleanLetters(word));
+      if (!entry) return null;
+      const best = bestPronFor(entry);
+      if (!best) return null;
+      const segs = best.a.rows.map((r) => {
+        const units = r.unit ? r.unit.split(' ') : [];
+        return { letters: r.chunk, units, vowel: units.some(isVowel) };
+      });
+      const nuclei = segs.map((sg, i) => (sg.vowel ? i : -1)).filter((i) => i >= 0);
+      const parts = [{ letters: '', units: [] }];
+      const addTo = (part, letters, units) => {
+        part.letters += letters;
+        part.units.push(...units);
+      };
+      let n = 0;
+      segs.forEach((sg, i) => {
+        const cur = parts[parts.length - 1];
+        if (sg.vowel) {
+          // Two vowel sounds in a row are two parts: cre·ate.
+          if (cur.units.some(isVowel)) parts.push({ letters: '', units: [] });
+          addTo(parts[parts.length - 1], sg.letters, sg.units);
+          n++;
+          return;
+        }
+        const left = nuclei[n - 1];
+        const right = nuclei[n];
+        if (left === undefined || right === undefined) return addTo(cur, sg.letters, sg.units);
+        // Consonants between two vowels: decide where the break goes.
+        if (i === left + 1) {
+          const between = segs.slice(left + 1, right);
+          const lastUnits = between.flatMap((b) => b.units);
+          let toRight = 1;
+          if (between.length >= 2) {
+            const two = lastUnits.slice(-2).join(' ');
+            toRight = ONSET_2.has(two) ? 2 : 1;
+          }
+          const prevVowel = segs[left].units.filter(isVowel).pop();
+          const single = between.length === 1 ? between[0] : null;
+          if (single && /^(.)\1$/.test(single.letters)) {
+            toRight = 'split'; // "ss" in necessary: es·sar
+          } else if (SHORT_STRESSED.has(prevVowel)) {
+            // A stressed short vowel keeps a consonant: nec·es, hos·pi·tal.
+            toRight = Math.min(toRight, between.length - 1);
+          }
+          segs.splitInfo = segs.splitInfo || {};
+          segs.splitInfo[left] = { toRight, count: between.length };
+        }
+        const info = segs.splitInfo[left];
+        const pos = i - left - 1; // position among the consonants
+        const goesRight = info.toRight === 'split' ? null : pos >= info.count - info.toRight;
+        if (goesRight === null) {
+          addTo(cur, sg.letters[0], []);
+          parts.push({ letters: sg.letters.slice(1), units: sg.units.slice() });
+        } else if (goesRight) {
+          if (cur.units.some(isVowel)) parts.push({ letters: '', units: [] });
+          addTo(parts[parts.length - 1], sg.letters, sg.units);
+        } else {
+          addTo(cur, sg.letters, sg.units);
+        }
+        if (i === right - 1 && parts[parts.length - 1].units.some(isVowel)) parts.push({ letters: '', units: [] });
+      });
+      const merged = parts.filter((p) => p.letters || p.units.length);
+      let v = -1;
+      const primary = best.units.primary;
+      const out = merged.map((p) => {
+        const hasV = p.units.some(isVowel);
+        if (hasV) v++;
+        const stressed = hasV && v === primary && merged.length > 1;
+        return { letters: p.letters, say: sayPart(p.units, stressed), stressed };
+      });
+      // Parts with no vowel sound (a stray silent letter) join their neighbour.
+      for (let i = out.length - 1; i >= 0; i--) {
+        if (!merged[i].units.some(isVowel) && out.length > 1) {
+          const j = i > 0 ? i - 1 : 1;
+          if (j < i) {
+            out[j].letters += out[i].letters;
+            out[j].say += out[i].say;
+          } else {
+            out[j].letters = out[i].letters + out[j].letters;
+            out[j].say = out[i].say + out[j].say;
+          }
+          out.splice(i, 1);
+          merged.splice(i, 1);
+        }
+      }
+      return { word: entry.word, parts: out, say: out.map((p) => p.say).join('-') };
+    }
+
+    // ---------- Levels ----------
+    function levelOf(word) {
+      const e = byWord.get(cleanLetters(word));
+      return e && e.level ? e.level : 0;
+    }
+
+    // Practice words for a level, most common first. Skips the other spelling
+    // style (colour vs color) when a style is given.
+    function levelWords(level, style) {
+      return words
+        .filter((e) => e.practice && e.level === level && !(style && e.variant && e.variant !== style))
+        .map((e) => e.word);
+    }
+
     // ---------- Learning your habits ----------
     // Call when you've confirmed that `text` was your try at `word`.
     function learn(text, word, user) {
@@ -489,6 +679,10 @@
       topPatterns,
       practiceWords,
       wordParts,
+      syllables,
+      levelOf,
+      levelWords,
+      variantOf: (w) => (byWord.get(cleanLetters(w)) || {}).variant || '',
       soundName,
       has: (w) => byWord.has(cleanLetters(w)),
       size: words.length,
