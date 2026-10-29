@@ -103,7 +103,7 @@ const Spelling = (() => {
   }
 
   function emptyData() {
-    return { words: [], stats: {}, log: {}, bestTower: 0, onlyMine: false };
+    return { words: [], stats: {}, log: {}, bestTower: 0, onlyMine: false, sound: null };
   }
 
   function normalize(raw) {
@@ -112,6 +112,9 @@ const Spelling = (() => {
     if (!d.stats || typeof d.stats !== 'object') d.stats = {};
     if (!d.log || typeof d.log !== 'object') d.log = {};
     d.words = d.words.filter((w) => w && typeof w.word === 'string' && w.word.trim());
+    // Your sound-spelling habits, learned by the Sound it out finder.
+    const s = d.sound;
+    if (!s || typeof s !== 'object' || !s.counts || !s.totals || !s.patterns) d.sound = { counts: {}, totals: {}, patterns: {} };
     return d;
   }
 
@@ -410,12 +413,13 @@ const Spelling = (() => {
     return document.getElementById('spellingPlay');
   }
 
-  function startMode(mode) {
+  function startMode(mode, customWords, title) {
     stopTower();
     if (mode === 'tower') return startTower();
     session = {
       mode,
-      words: pickWords(ROUND_SIZE),
+      title: title || '',
+      words: customWords && customWords.length ? customWords : pickWords(ROUND_SIZE),
       index: 0,
       results: [],
       answered: false,
@@ -461,7 +465,7 @@ const Spelling = (() => {
     session.answered = false;
     session.hint = false;
     session.fixFound = false;
-    const head = playHeader(MODES[session.mode].title);
+    const head = playHeader(session.title || MODES[session.mode].title);
 
     if (session.mode === 'hear') {
       el.innerHTML = `${head}
@@ -534,6 +538,7 @@ const Spelling = (() => {
     const entry = session.entry;
     const added = record(entry.word, correct, correct ? '' : attempt);
     session.results.push({ word: entry.word, correct, attempt });
+    const soundTips = correct ? [] : learnFromMiss(attempt, entry.word);
     const input = document.getElementById('spAnswer');
     if (input) input.disabled = true;
     const form = document.getElementById('spAnswerForm');
@@ -545,6 +550,7 @@ const Spelling = (() => {
       <div class="sp-feedback ${correct ? 'good' : 'bad'}">
         <div class="sp-feedback-title">${correct ? '✅ Correct!' : '❌ Not quite'}</div>
         ${correct ? `<div class="sp-word sp-word-big">${escapeHtml(entry.word)}</div>` : diffHTML(entry.word, attempt)}
+        ${soundTips.map((t) => `<p class="sp-tip">🔈 ${t}</p>`).join('')}
         ${entry.tip ? `<p class="sp-tip">💡 ${escapeHtml(entry.tip)}</p>` : ''}
         ${added ? '<p class="sp-added">Added to your tricky words, so you will see it again.</p>' : ''}
         <div class="sp-feedback-actions">
@@ -881,12 +887,217 @@ const Spelling = (() => {
   function renderHome() {
     renderSummary();
     renderWordList();
+    renderHabits();
   }
 
   function renderAll() {
     renderModes();
     renderHome();
     if (typeof renderDashboard === 'function') renderDashboard();
+  }
+
+  // ---------- Sound it out finder ----------
+  // Uses SoundEngine (sound-engine.js) and the learned data file.
+  let engine = null;
+  let engineLoading = null;
+  let lastQuery = '';
+  let lastLearned = '';
+  let findTimer = null;
+
+  const CAPITALISED = new Set(['i', 'english', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    'january', 'february', 'march', 'april', 'june', 'july', 'august', 'september', 'october', 'november', 'december']);
+
+  function displayWord(w) {
+    return CAPITALISED.has(w) ? w[0].toUpperCase() + w.slice(1) : w;
+  }
+
+  function ensureEngine() {
+    if (engine) return Promise.resolve(engine);
+    if (engineLoading) return engineLoading;
+    if (typeof SoundEngine === 'undefined') return Promise.reject(new Error('Sound engine missing'));
+    setFinderStatus('Loading the English sound dictionary…');
+    engineLoading = fetch('sound-data.json')
+      .then((r) => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then((raw) => {
+        engine = SoundEngine.create(raw);
+        setFinderStatus('');
+        renderHabits();
+        const input = document.getElementById('soundInput');
+        if (input && input.value.trim()) runFind();
+        return engine;
+      })
+      .catch((err) => {
+        engineLoading = null;
+        setFinderStatus('Could not load the sound dictionary. Check your connection and try again.');
+        throw err;
+      });
+    return engineLoading;
+  }
+
+  function setFinderStatus(text) {
+    const el = document.getElementById('soundStatus');
+    if (el) {
+      el.textContent = text;
+      el.hidden = !text;
+    }
+  }
+
+  function scheduleFind() {
+    clearTimeout(findTimer);
+    findTimer = setTimeout(runFind, 220);
+  }
+
+  function runFind() {
+    const input = document.getElementById('soundInput');
+    const list = document.getElementById('soundResults');
+    const query = input.value.trim();
+    document.getElementById('soundExplain').innerHTML = '';
+    if (!query) {
+      list.innerHTML = '';
+      lastQuery = '';
+      return;
+    }
+    if (!engine) {
+      ensureEngine().catch(() => {});
+      return;
+    }
+    lastQuery = query;
+    const results = engine.find(query, { limit: 5, user: data.sound });
+    if (!results.length) {
+      list.innerHTML = '<li class="sp-muted">No match yet. Try typing more of the word.</li>';
+      return;
+    }
+    const exact = results[0].exact && results[0].chance > 0.5;
+    list.innerHTML =
+      (exact ? '<li class="sound-ok">✅ That is already a real word. Other words it might be:</li>' : '') +
+      results
+        .map((r) => {
+          const pct = Math.max(1, Math.round(r.chance * 100));
+          return `
+          <li>
+            <button type="button" class="sound-result" data-sp="pick" data-word="${escapeHtml(r.word)}">
+              <span class="sound-result-word">${escapeHtml(displayWord(r.word))}</span>
+              <span class="sound-bar"><span style="width:${pct}%"></span></span>
+              <span class="sound-pct">${r.chance < 0.01 ? '<1' : pct}%</span>
+            </button>
+          </li>`;
+        })
+        .join('');
+  }
+
+  function pickWord(word) {
+    if (!engine) return;
+    const typed = lastQuery;
+    const info = engine.explain(typed, word, data.sound);
+    if (!info) return;
+    // Picking a match tells the engine what you meant, so it learns your habits.
+    const key = typed.toLowerCase() + '|' + word;
+    const learned = typed && SoundEngine.cleanLetters(typed) !== word && key !== lastLearned;
+    if (learned) {
+      engine.learn(typed, word, data.sound);
+      lastLearned = key;
+      persist();
+      renderHabits();
+    }
+    if (canSpeak) speak(word);
+    const shown = displayWord(word);
+    const anyWrong = info.sounds.some((r) => !r.ok);
+    const rows = info.sounds
+      .map((r) => `
+        <tr class="${r.ok ? '' : 'off'}">
+          <td>${escapeHtml(r.sound)}</td>
+          <td class="sound-chunk">${r.yours === null ? '' : r.yours ? escapeHtml(r.yours) : '<span class="sp-muted">—</span>'}</td>
+          <td class="sound-chunk right">${r.right ? escapeHtml(r.right) : '<span class="sp-muted">(silent)</span>'}</td>
+        </tr>
+        ${r.tip ? `<tr class="sound-tip-row"><td colspan="3">💡 ${escapeHtml(r.tip)}</td></tr>` : ''}`)
+      .join('');
+    const parts = info.parts.length
+      ? `<h4 class="sp-subhead">Word parts</h4>
+         <div class="sound-parts">${info.parts.map((p) => `<span class="sound-part ${p.kind}">${escapeHtml(p.text)}</span>`).join('<span class="sp-muted">+</span>')}</div>
+         ${info.parts.filter((p) => p.note).map((p) => `<p class="sp-tip">🧩 ${escapeHtml(p.note)}</p>`).join('')}`
+      : '';
+    document.getElementById('soundExplain').innerHTML = `
+      <div class="sound-explain">
+        <div class="sound-explain-head">
+          <div class="sp-word sp-word-big">${escapeHtml(shown)}</div>
+          <div class="sp-feedback-actions">
+            ${canSpeak ? `<button type="button" class="secondary-btn" data-sp="sayword" data-word="${escapeHtml(word)}">🔊 Hear</button>` : ''}
+            <button type="button" class="secondary-btn" data-sp="copy" data-word="${escapeHtml(shown)}">Copy</button>
+            ${isMine(word) ? '' : `<button type="button" class="secondary-btn" data-sp="addtricky" data-word="${escapeHtml(shown)}">+ Tricky words</button>`}
+          </div>
+        </div>
+        <h4 class="sp-subhead">Sound by sound</h4>
+        <table class="sound-table">
+          <thead><tr><th>Sound</th><th>${typed ? 'You wrote' : ''}</th><th>Spelled</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${!anyWrong && typed ? '<p class="sp-tip">You had every sound right.</p>' : ''}
+        ${parts}
+        ${learned ? '<p class="sp-added">Got it. The finder now knows a bit more about how you spell.</p>' : ''}
+      </div>`;
+  }
+
+  // From practice: a wrong answer teaches the finder too, and gives sound tips.
+  function learnFromMiss(attempt, word) {
+    const w = String(word).toLowerCase();
+    if (!engine || !attempt || !engine.has(w) || w.includes(' ')) return [];
+    // Only learn from real tries, not from "xx" or a different word.
+    const tried = SoundEngine.cleanLetters(attempt);
+    if (SoundEngine.editDistance(tried, w, 8) > Math.max(2, Math.ceil(w.length * 0.5))) return [];
+    const info = engine.explain(attempt, w, data.sound);
+    engine.learn(attempt, w, data.sound);
+    persist();
+    if (!info) return [];
+    return info.sounds
+      .filter((r) => !r.ok && r.tip)
+      .slice(0, 2)
+      .map((r) => `<b>${escapeHtml(r.yours || '—')} → ${escapeHtml(r.right)}</b>: ${escapeHtml(r.tip)}`);
+  }
+
+  function renderHabits() {
+    const el = document.getElementById('soundHabits');
+    if (!el) return;
+    const list = engine ? engine.topPatterns(data.sound, 5) : [];
+    if (!list.length) {
+      el.innerHTML = '<li class="empty-state">Use the finder or practise a few words. Patterns in how you spell will show up here.</li>';
+      return;
+    }
+    el.innerHTML = list
+      .map((p) => {
+        const key = `${p.unit}|${p.right}|${p.yours}`;
+        const example = p.words[0] ? ` e.g. <i>${escapeHtml(displayWord(p.words[0]))}</i>` : '';
+        const wrote = p.yours ? `you write <b>${escapeHtml(p.yours)}</b>` : 'you leave it out';
+        return `
+          <li class="item-card">
+            <div class="item-main">
+              <div class="item-title">For the ${escapeHtml(p.sound)} sound, ${wrote} where the word uses <b>${escapeHtml(p.right || '(nothing)')}</b></div>
+              <div class="item-meta">${p.n} time${p.n === 1 ? '' : 's'}${example}</div>
+            </div>
+            ${p.right ? `<button type="button" class="secondary-btn" data-sp="pattern" data-key="${escapeHtml(key)}">Practise</button>` : ''}
+          </li>`;
+      })
+      .join('');
+  }
+
+  function practisePattern(key) {
+    if (!engine) return;
+    const p = data.sound.patterns[key];
+    if (!p) return;
+    const words = shuffle([...new Set([...p.words, ...engine.practiceWords(p.unit, p.right, 12, p.words)])].slice(0, ROUND_SIZE));
+    if (!words.length) return showWarning('No practice words found for that pattern yet.');
+    startMode('hear', words.map(displayWord), `Practise "${p.right}" for the ${engine.soundName(p.unit)} sound`);
+  }
+
+  function copyText(text) {
+    const done = () => showToast(`Copied "${text}".`);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, () => showWarning('Could not copy. Long-press the word to copy it.'));
+    } else {
+      showWarning('Copy is not available here. Long-press the word to copy it.');
+    }
   }
 
   // ---------- Events ----------
@@ -899,6 +1110,17 @@ const Spelling = (() => {
     if (action === 'next') return next();
     if (action === 'remove') return removeWord(btn.dataset.id);
     if (action === 'sayword') return speak(btn.dataset.word);
+    if (action === 'pick') return pickWord(btn.dataset.word);
+    if (action === 'copy') return copyText(btn.dataset.word);
+    if (action === 'pattern') return practisePattern(btn.dataset.key);
+    if (action === 'addtricky') {
+      if (addWords(btn.dataset.word, '')) {
+        renderHome();
+        showToast(`Added "${btn.dataset.word}" to your tricky words.`);
+      }
+      btn.remove();
+      return;
+    }
 
     if (session) {
       const entry = session.entry;
@@ -994,6 +1216,17 @@ const Spelling = (() => {
     document.getElementById('tabs').addEventListener('click', (e) => {
       const tab = e.target.closest('.tab-btn');
       if (tab && tab.dataset.tab !== 'spelling' && (session || tower)) quit();
+      if (tab && tab.dataset.tab === 'spelling') ensureEngine().catch(() => {});
+    });
+    const soundInput = document.getElementById('soundInput');
+    soundInput.addEventListener('input', scheduleFind);
+    soundInput.addEventListener('focus', () => ensureEngine().catch(() => {}));
+    document.getElementById('soundForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      clearTimeout(findTimer);
+      runFind();
+      const first = document.querySelector('#soundResults .sound-result');
+      if (first) first.click();
     });
     document.getElementById('spOnlyMine').addEventListener('change', (e) => {
       data.onlyMine = e.target.checked;
@@ -1034,6 +1267,7 @@ const Spelling = (() => {
     },
     importData(raw) {
       data = normalize(raw);
+      lastLearned = '';
       persist();
       quit();
       renderAll();

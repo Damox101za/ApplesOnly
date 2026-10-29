@@ -204,6 +204,19 @@
 
     <section id="spelling" class="tab-panel">
       <div id="spellingHome">
+        <div class="sound-card">
+          <h2 class="section-heading">🔎 Sound it out</h2>
+          <p class="sp-muted sp-intro">Not sure how to spell a word? Type it the way it sounds. You'll get the real spelling and see why it's spelled that way.</p>
+          <form id="soundForm" class="sp-answer sound-form">
+            <input type="text" id="soundInput" class="sp-input" placeholder="e.g. nesesery"
+              autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+            <button type="submit">Find</button>
+          </form>
+          <p class="sp-muted sound-status" id="soundStatus" hidden></p>
+          <ul class="sound-results" id="soundResults"></ul>
+          <div id="soundExplain"></div>
+        </div>
+
         <div class="card-grid" id="spellingSummary"></div>
 
         <p class="sp-note" id="spellingSpeechNote" hidden>
@@ -212,6 +225,10 @@
 
         <h2 class="section-heading">Practise</h2>
         <div class="sp-modes" id="spellingModes"></div>
+
+        <h2 class="section-heading">Your spelling habits</h2>
+        <p class="sp-muted sp-intro">Sounds you often spell a different way. Practise the pattern, not just one word.</p>
+        <ul class="item-list" id="soundHabits"></ul>
 
         <h2 class="section-heading">Your tricky words</h2>
         <p class="sp-muted sp-intro">
@@ -244,6 +261,7 @@
   </div>
 
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="sound-engine.js"></script>
   <script src="spelling.js"></script>
   <script src="app.js"></script>
 </body>

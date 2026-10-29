@@ -1,10 +1,12 @@
 {
   "name": "applesonly",
   "version": "1.0.0",
-  "description": "A personal life tracker: habits, journal, and goals.",
+  "description": "A personal life tracker: habits, journal, goals, and a spelling trainer.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test",
+    "build:sounds": "node scripts/build-sound-data.js"
   },
   "engines": {
     "node": ">=18"
