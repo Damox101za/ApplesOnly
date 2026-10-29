@@ -22,6 +22,7 @@
     <button class="tab-btn" data-tab="goals">Goals</button>
     <button class="tab-btn" data-tab="tasks">Tasks</button>
     <button class="tab-btn" data-tab="calendar">Calendar</button>
+    <button class="tab-btn" data-tab="spelling">Spelling</button>
   </nav>
 
   <main>
@@ -200,6 +201,41 @@
         <ul class="item-list" id="calendarDayDetailList"></ul>
       </div>
     </section>
+
+    <section id="spelling" class="tab-panel">
+      <div id="spellingHome">
+        <div class="card-grid" id="spellingSummary"></div>
+
+        <p class="sp-note" id="spellingSpeechNote" hidden>
+          Your browser can't read words aloud, so the word will flash on screen for a moment instead.
+        </p>
+
+        <h2 class="section-heading">Practise</h2>
+        <div class="sp-modes" id="spellingModes"></div>
+
+        <h2 class="section-heading">Your tricky words</h2>
+        <p class="sp-muted sp-intro">
+          Add words autocorrect keeps fixing for you. Paste several at once, split by commas or new lines.
+          Words you get wrong in practice are added here by themselves.
+        </p>
+        <form id="spellingWordForm" class="stacked-form">
+          <textarea id="spellingWordInput" rows="2" placeholder="e.g. definitely, necessary, separate"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" required></textarea>
+          <details class="google-setup sp-sentence-setup">
+            <summary>Add an example sentence (optional, one word only)</summary>
+            <input type="text" id="spellingSentenceInput" placeholder="Use ___ for the word, e.g. I will ___ come.">
+          </details>
+          <button type="submit">Add words</button>
+        </form>
+        <label class="sp-toggle">
+          <input type="checkbox" id="spOnlyMine">
+          Practise only my words
+        </label>
+        <ul class="item-list" id="spellingWordList"></ul>
+      </div>
+
+      <div id="spellingPlay" hidden></div>
+    </section>
   </main>
 
   <div class="toast" id="toast">
@@ -208,6 +244,7 @@
   </div>
 
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="spelling.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

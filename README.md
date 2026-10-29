@@ -16,6 +16,13 @@ minimal Node.js static file server.
   Calendar (enter your own Google OAuth client ID in the Calendar tab).
 - **Activity graph** — a GitHub-style contribution heatmap and streak cards on
   the dashboard, computed from your habit and journal data.
+- **Spelling** — a spelling trainer for words autocorrect usually fixes for
+  you. Four ways to practise: *Hear it, type it* (the word is read aloud),
+  *Spot the right one*, *Fix the sentence*, and *Spelling tower*, a timed
+  game where each correct word adds a block. Wrong answers show which letters
+  were off, plus a memory tip. Words you miss go to your own list, and spaced
+  repetition brings weak words back more often. Autocorrect is switched off
+  in the answer boxes so the practice is all you.
 - **Backup** — export/import all data as JSON, with undo on deletes and
   automatic schema migrations.
 

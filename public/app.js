@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   googleClientId: 'lifeTracker.googleClientId',
   lastGoogleSyncAt: 'lifeTracker.lastGoogleSyncAt',
   taskViewMode: 'lifeTracker.taskViewMode',
+  spelling: 'lifeTracker.spelling',
 };
 
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
@@ -213,7 +214,10 @@ function showToast(message, onUndo) {
   toast.querySelector('.toast-message').textContent = message;
   const undoBtn = toast.querySelector('.toast-undo');
   undoBtn.onclick = onUndo;
+  undoBtn.hidden = !onUndo;
   toast.classList.add('visible');
+  clearTimeout(showToast._t);
+  if (!onUndo) showToast._t = setTimeout(hideToast, 3000);
 }
 
 function hideToast() {
@@ -1259,7 +1263,7 @@ document.getElementById('icsImportCancelBtn').addEventListener('click', cancelIC
 
 // ---------- Backup: export / import ----------
 function hasAnyData() {
-  return habits.length > 0 || journal.length > 0 || goals.length > 0 || tasks.length > 0;
+  return habits.length > 0 || journal.length > 0 || goals.length > 0 || tasks.length > 0 || Spelling.hasData();
 }
 
 function daysSinceLastBackup() {
@@ -1276,6 +1280,7 @@ function exportBackup() {
     journal,
     goals,
     tasks,
+    spelling: Spelling.exportData(),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -1298,7 +1303,8 @@ function isValidBackup(data) {
     Array.isArray(data.habits) &&
     Array.isArray(data.journal) &&
     Array.isArray(data.goals) &&
-    (data.tasks === undefined || Array.isArray(data.tasks))
+    (data.tasks === undefined || Array.isArray(data.tasks)) &&
+    (data.spelling === undefined || (data.spelling !== null && typeof data.spelling === 'object'))
   );
 }
 
@@ -1321,9 +1327,10 @@ function handleImportFile(file) {
     pendingImport = data;
     const summary = document.getElementById('importSummary');
     const taskCount = Array.isArray(data.tasks) ? data.tasks.length : 0;
+    const spellingCount = data.spelling && Array.isArray(data.spelling.words) ? data.spelling.words.length : 0;
     summary.textContent =
       `This file has ${data.habits.length} habit(s), ${data.journal.length} journal entr${data.journal.length === 1 ? 'y' : 'ies'}, ` +
-      `${data.goals.length} goal(s), and ${taskCount} task(s)` +
+      `${data.goals.length} goal(s), ${taskCount} task(s), and ${spellingCount} spelling word(s)` +
       (data.exportedAt ? `, exported ${new Date(data.exportedAt).toLocaleString()}` : '') +
       '. Importing will replace your current data. Continue?';
     document.getElementById('importConfirm').classList.add('visible');
@@ -1333,7 +1340,7 @@ function handleImportFile(file) {
 
 function confirmImport() {
   if (!pendingImport) return;
-  const previous = { habits, journal, goals, tasks };
+  const previous = { habits, journal, goals, tasks, spelling: JSON.parse(JSON.stringify(Spelling.exportData())) };
   const migrated = migrate({
     habits: pendingImport.habits,
     journal: pendingImport.journal,
@@ -1350,6 +1357,8 @@ function confirmImport() {
   save(STORAGE_KEYS.goals, goals);
   save(STORAGE_KEYS.tasks, tasks);
   save(STORAGE_KEYS.schemaVersion, migrated.schemaVersion);
+  // Older backups have no spelling data; keep what's here in that case.
+  if (pendingImport.spelling) Spelling.importData(pendingImport.spelling);
   renderHabits();
   renderJournal();
   renderGoals();
@@ -1365,6 +1374,7 @@ function confirmImport() {
     save(STORAGE_KEYS.journal, journal);
     save(STORAGE_KEYS.goals, goals);
     save(STORAGE_KEYS.tasks, tasks);
+    Spelling.importData(previous.spelling);
     renderHabits();
     renderJournal();
     renderGoals();
@@ -1396,6 +1406,7 @@ window.addEventListener('storage', (e) => {
   journal = load(STORAGE_KEYS.journal, []);
   goals = load(STORAGE_KEYS.goals, []);
   tasks = load(STORAGE_KEYS.tasks, []);
+  if (e.key === STORAGE_KEYS.spelling) Spelling.reload();
   renderHabits();
   renderJournal();
   renderGoals();
@@ -1416,6 +1427,9 @@ function activityCounts() {
   journal.forEach((entry) => {
     const d = localDateKey(new Date(entry.createdAt));
     counts[d] = (counts[d] || 0) + 1;
+  });
+  Object.entries(Spelling.activityCounts()).forEach(([d, n]) => {
+    counts[d] = (counts[d] || 0) + n;
   });
   return counts;
 }
@@ -1659,6 +1673,7 @@ function renderDashboard() {
     { value: latestMood, label: 'Latest mood' },
     { value: tasksDueToday, label: 'Tasks due today' },
     { value: overdueTasks, label: 'Overdue tasks' },
+    ...Spelling.dashboardStats(),
   ];
 
   grid.innerHTML = stats
@@ -1695,6 +1710,7 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+Spelling.init();
 renderHabits();
 renderJournal();
 renderGoals();
