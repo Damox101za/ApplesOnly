@@ -171,7 +171,8 @@ const Spelling = (() => {
     const starter = starterByKey.get(k);
     const mine = data.words.find((w) => keyOf(w.word) === k);
     const base = starter ? starter.word : (mine ? mine.word.trim() : word.trim());
-    let sentence = (mine && mine.sentence) || (starter && starter.sentence) || '';
+    const d = defOf(base);
+    let sentence = (mine && mine.sentence) || (starter && starter.sentence) || (d && d.s) || '';
     if (sentence && !sentence.includes('___')) sentence = '';
     if (!sentence) sentence = FALLBACK_SENTENCES[hash(k) % FALLBACK_SENTENCES.length];
     let wrongs = starter ? starter.wrongs.slice() : [];
@@ -539,6 +540,56 @@ const Spelling = (() => {
     return `${escapeHtml(before)}${mid}${escapeHtml(after || '')}`;
   }
 
+  // ---------- Definitions ----------
+  // Meanings come from Open English WordNet, split into one file per first
+  // letter (public/defs/a.json …) and loaded only when needed.
+  const defsByLetter = new Map(); // letter -> Promise
+  const defs = new Map(); // word -> { m: [[pos, definition, example?]], s, f }
+
+  function loadDefs(words) {
+    const letters = new Set(words.map((w) => keyOf(w)[0]).filter((c) => c && /[a-z]/.test(c)));
+    return Promise.all(
+      [...letters].map((c) => {
+        if (!defsByLetter.has(c)) {
+          defsByLetter.set(
+            c,
+            fetch(`defs/${c}.json`)
+              .then((r) => (r.ok ? r.json() : {}))
+              .then((obj) => Object.entries(obj).forEach(([w, d]) => defs.set(w, d)))
+              .catch(() => {}) // no meanings for this letter until the page reloads
+          );
+        }
+        return defsByLetter.get(c);
+      })
+    );
+  }
+
+  function defOf(word) {
+    return defs.get(keyOf(word)) || null;
+  }
+
+  // Hide the word inside its own definition, so a clue doesn't give it away.
+  function mask(text, word) {
+    const d = defOf(word);
+    const forms = [keyOf(word), d && d.f].filter(Boolean).map((w) => w.replace(/[^a-z ]/g, ''));
+    return forms.reduce((t, w) => t.replace(new RegExp(`\\b${w}\\w*`, 'gi'), '___'), text);
+  }
+
+  function meaningHTML(word, opts = {}) {
+    const d = defOf(word);
+    if (!d) return '';
+    const list = d.m.slice(0, opts.max || 3);
+    const show = (t) => escapeHtml(opts.masked ? mask(t, word) : t);
+    return `
+      <div class="sp-meaning">
+        ${opts.title === false ? '' : `<div class="sp-meaning-title">📖 Meaning${d.f && !opts.masked ? ` <span class="sp-muted">(a form of "${escapeHtml(d.f)}")</span>` : ''}</div>`}
+        <ol class="sp-meaning-list${list.length === 1 ? ' single' : ''}">
+          ${list.map(([pos, def, ex]) => `
+            <li>${pos ? `<span class="sp-pos">${escapeHtml(pos)}</span> ` : ''}${show(def)}${ex ? `<div class="sp-example">“${show(ex)}”</div>` : ''}</li>`).join('')}
+        </ol>
+      </div>`;
+  }
+
   // ---------- Practice rounds (hear / spot / fix) ----------
   const MODES = {
     hear: { icon: '🔊', title: 'Hear it, type it', desc: 'Listen to the word, then type it.' },
@@ -579,7 +630,13 @@ const Spelling = (() => {
       wrongShown: null,
     };
     showPlay(true);
-    renderQuestion();
+    // Load meanings and example sentences for this round's words first.
+    const mySession = session;
+    playEl().innerHTML = '<p class="sp-muted sp-loading">Getting your words ready…</p>';
+    const ready = () => {
+      if (session === mySession) renderQuestion();
+    };
+    Promise.race([loadDefs(session.words), new Promise((r) => setTimeout(r, 2500))]).then(ready, ready);
   }
 
   function showPlay(on) {
@@ -625,7 +682,9 @@ const Spelling = (() => {
             ${canSpeak ? `<button type="button" class="secondary-btn" data-sp="sayslow" data-word="${escapeHtml(entry.word)}">🐢 Slow</button>` : ''}
             ${canSpeak && engine && engine.syllables(entry.word) ? `<button type="button" class="secondary-btn" data-sp="sayparts" data-word="${escapeHtml(entry.word)}">🧩 By parts</button>` : ''}
             ${level().hints ? `<button type="button" class="secondary-btn" data-sp="sentence">${canSpeak ? 'In a sentence' : 'Show the sentence'}</button>` : ''}
+            ${defOf(entry.word) ? '<button type="button" class="secondary-btn" data-sp="meaning">📖 Meaning</button>' : ''}
           </div>
+          <div id="spMeaning" hidden></div>
           <div class="sp-peek" id="spPeek" aria-live="polite"></div>
           ${level().showLetters ? `<p class="sp-letters">${entry.word.split('').map((c) => (c === ' ' ? '&nbsp;' : '_')).join(' ')} <span class="sp-muted">(${entry.word.replace(/ /g, '').length} letters)</span></p>` : ''}
           <p class="sp-sentence" id="spSentence" hidden></p>
@@ -644,6 +703,7 @@ const Spelling = (() => {
         <div class="sp-card">
           <p class="sp-prompt">Which spelling is right?</p>
           <p class="sp-sentence">${blankSentence(entry, false)}</p>
+          ${meaningHTML(entry.word, { masked: true, max: 1, title: false })}
           <div class="sp-options">
             ${session.options.map((o, i) => `<button type="button" class="sp-option" data-sp="option" data-i="${i}">${escapeHtml(o)}</button>`).join('')}
           </div>
@@ -704,6 +764,7 @@ const Spelling = (() => {
         <div class="sp-feedback-title">${correct ? '✅ Correct!' : '❌ Not quite'}</div>
         ${correct ? `<div class="sp-word sp-word-big">${escapeHtml(entry.word)}</div>` : diffHTML(entry.word, attempt)}
         ${sayItHTML(entry.word)}
+        ${meaningHTML(entry.word, { max: 1 })}
         ${soundTips.map((t) => `<p class="sp-tip">🔈 ${t}</p>`).join('')}
         ${entry.tip ? `<p class="sp-tip">💡 ${escapeHtml(entry.tip)}</p>` : ''}
         ${added ? '<p class="sp-added">Added to your tricky words, so you will see it again.</p>' : ''}
@@ -793,6 +854,7 @@ const Spelling = (() => {
       busy: false,
       over: false,
     };
+    loadDefs(tower.queue);
     showPlay(true);
     playEl().innerHTML = `
       <div class="sp-play-head">
@@ -1034,6 +1096,8 @@ const Spelling = (() => {
       list.innerHTML = '<li class="empty-state">No words yet. Add words that autocorrect fixes for you, or just practise. Any word you miss lands here automatically.</li>';
       return;
     }
+    const missing = data.words.filter((w) => !defOf(w.word) && !defsByLetter.has(keyOf(w.word)[0]));
+    if (missing.length) loadDefs(missing.map((w) => w.word)).then(renderWordList);
     const sorted = [...data.words].sort((a, b) => statFor(a.word).box - statFor(b.word).box || b.addedAt - a.addedAt);
     list.innerHTML = sorted
       .map((w) => {
@@ -1043,11 +1107,13 @@ const Spelling = (() => {
         else meta.push('Not practised yet');
         if (s.lastWrong) meta.push(`last tried "${s.lastWrong}"`);
         if (w.source === 'missed') meta.push('added after a miss');
+        const d = defOf(w.word);
         return `
           <li class="item-card">
             <div class="item-main">
               <div class="item-title">${escapeHtml(w.word)} ${boxDots(s.box)}</div>
               <div class="item-meta">${escapeHtml(meta.join(' · '))}</div>
+              ${d ? `<div class="item-meta sp-list-meaning">📖 ${escapeHtml(d.m[0][1])}</div>` : ''}
             </div>
             ${canSpeak ? `<button type="button" class="edit-btn" data-sp="sayword" data-word="${escapeHtml(w.word)}" aria-label="Hear ${escapeHtml(w.word)}">🔊</button>` : ''}
             <button type="button" class="delete-btn" data-sp="remove" data-id="${escapeHtml(w.id)}" aria-label="Remove ${escapeHtml(w.word)}">✕</button>
@@ -1175,6 +1241,12 @@ const Spelling = (() => {
       renderHabits();
     }
     if (canSpeak) speak(word);
+    if (!defOf(word)) {
+      loadDefs([word]).then(() => {
+        const el = document.getElementById('soundMeaning');
+        if (el) el.innerHTML = meaningHTML(word);
+      });
+    }
     const shown = displayWord(word);
     const variant = engine.variantOf(word);
     const anyWrong = info.sounds.some((r) => !r.ok);
@@ -1203,6 +1275,7 @@ const Spelling = (() => {
         </div>
         ${variant ? `<p class="sp-muted sound-variant">${variant === 'us' ? 'American spelling' : 'British spelling'}</p>` : ''}
         ${sayItHTML(word)}
+        <div id="soundMeaning">${meaningHTML(word)}</div>
         <h4 class="sp-subhead">Sound by sound</h4>
         <table class="sound-table">
           <thead><tr><th>Sound</th><th>${typed ? 'You wrote' : ''}</th><th>Spelled</th></tr></thead>
@@ -1381,6 +1454,11 @@ const Spelling = (() => {
         s.innerHTML = blankSentence(entry, session.hint);
         s.hidden = false;
         if (canSpeak) saySentence(entry);
+      } else if (action === 'meaning') {
+        const box = document.getElementById('spMeaning');
+        box.innerHTML = meaningHTML(entry.word, { masked: true, max: 2 });
+        box.hidden = false;
+        btn.hidden = true;
       } else if (action === 'hint') {
         session.hint = true;
         const s = document.getElementById('spSentence');

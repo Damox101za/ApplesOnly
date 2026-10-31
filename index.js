@@ -2,6 +2,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 const port = process.env.PORT || 1337;
 
@@ -14,7 +15,12 @@ const mimeTypes = {
     '.svg': 'image/svg+xml',
     '.png': 'image/png',
     '.json': 'application/json',
+    '.txt': 'text/plain',
 };
+// Text files are sent gzip-compressed when the browser accepts it, so the
+// word and definition data load quickly on phones.
+const compressible = new Set(['.html', '.js', '.css', '.json', '.svg', '.txt']);
+const gzipCache = new Map(); // filePath -> { mtimeMs, body }
 
 const server = http.createServer((req, res) => {
     let pathname;
@@ -35,14 +41,38 @@ const server = http.createServer((req, res) => {
 
     const contentType = mimeTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
 
-    fs.readFile(filePath, (error, content) => {
-        if (error) {
+    const ext = path.extname(filePath).toLowerCase();
+    const wantsGzip = compressible.has(ext) && /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+
+    fs.stat(filePath, (statErr, stat) => {
+        if (statErr || !stat.isFile()) {
             res.writeHead(404);
-            res.end('404 Not Found');
-        } else {
-            res.writeHead(200, { 'Content-Type': contentType });
-            res.end(content);
+            return res.end('404 Not Found');
         }
+        const cached = gzipCache.get(filePath);
+        if (wantsGzip && cached && cached.mtimeMs === stat.mtimeMs) {
+            res.writeHead(200, { 'Content-Type': contentType, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+            return res.end(cached.body);
+        }
+        fs.readFile(filePath, (error, content) => {
+            if (error) {
+                res.writeHead(404);
+                return res.end('404 Not Found');
+            }
+            if (!wantsGzip) {
+                res.writeHead(200, { 'Content-Type': contentType });
+                return res.end(content);
+            }
+            zlib.gzip(content, (zipErr, body) => {
+                if (zipErr) {
+                    res.writeHead(200, { 'Content-Type': contentType });
+                    return res.end(content);
+                }
+                gzipCache.set(filePath, { mtimeMs: stat.mtimeMs, body });
+                res.writeHead(200, { 'Content-Type': contentType, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+                res.end(body);
+            });
+        });
     });
 });
 

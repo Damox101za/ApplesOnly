@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "test": "node --test",
-    "build:sounds": "node scripts/build-sound-data.js"
+    "build:sounds": "node scripts/build-sound-data.js",
+    "build:defs": "node scripts/build-definitions.js"
   },
   "engines": {
     "node": ">=18"

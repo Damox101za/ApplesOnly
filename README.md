@@ -37,6 +37,12 @@ minimal Node.js static file server.
   slowly, or part by part (*nec · es · sar · y*), with a dictionary-style
   "say it" line (**NESS**-uh-sair-ee). British or American spelling style
   (colour/color) is a setting too.
+- **Meanings** — definitions and examples for about 23,500 words (from Open
+  English WordNet), plus hand-written ones for small look-alike words
+  (*their / there*, *its*, *whether*). They show in Sound it out, after each
+  answer, in your tricky-words list, and as a "📖 Meaning" clue while
+  practising (the word itself is hidden). Real example sentences are used for
+  "In a sentence" and Fix the sentence.
 - **Backup** — export/import all data as JSON, with undo on deletes and
   automatic schema migrations.
 
@@ -132,6 +138,16 @@ curl -L -o bad.txt https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naugh
 npm run build:sounds -- cmudict.dict en_50k.txt --us en.dic en.aff --gb en-GB.dic en-GB.aff --bad bad.txt
 ```
 
+Then rebuild the meanings (`public/defs/`). Run this after `build:sounds`,
+because it also takes words with no meaning (slang like *wanna*) out of
+practice:
+
+```bash
+curl -LO https://github.com/globalwordnet/english-wordnet/releases/download/2024-edition/english-wordnet-2024.xml.gz
+gunzip english-wordnet-2024.xml.gz
+npm run build:defs -- english-wordnet-2024.xml
+```
+
 Data credits: [CMU Pronouncing Dictionary](https://github.com/cmusphinx/cmudict)
 (© Carnegie Mellon University, BSD-style licence) and
 [FrequencyWords](https://github.com/hermitdave/FrequencyWords) by Hermit Dave
@@ -140,7 +156,9 @@ Data credits: [CMU Pronouncing Dictionary](https://github.com/cmusphinx/cmudict)
 (SCOWL) and the
 [LDNOOBW list](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words)
 (CC BY 4.0). `public/sound-data.json` is derived from these, so it is shared
-under CC BY-SA 4.0.
+under CC BY-SA 4.0. Meanings in `public/defs/` come from
+[Open English WordNet 2024](https://github.com/globalwordnet/english-wordnet)
+(CC BY 4.0).
 
 ## Tests
 

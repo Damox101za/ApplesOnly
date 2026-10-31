@@ -1791,3 +1791,54 @@ button {
   font-size: 0.8rem;
   margin: 0.25rem 0 0;
 }
+
+/* ---------- Meanings ---------- */
+.sp-meaning {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.sp-meaning-title {
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+
+.sp-meaning-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sp-meaning-list.single {
+  list-style: none;
+  padding-left: 0;
+}
+
+.sp-pos {
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.sp-example {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.85rem;
+  margin-top: 0.1rem;
+}
+
+.sp-list-meaning {
+  font-style: italic;
+}
+
+.sp-loading {
+  text-align: center;
+  padding: 2rem 0;
+}
