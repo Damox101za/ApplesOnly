@@ -1064,3 +1064,62 @@ select.edit-input {
   flex: 1 1 150px;
   min-width: 0;
 }
+
+/* ---------- Life Wheel ---------- */
+.area-select {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.area-select.small {
+  padding: 0.1rem 0.3rem;
+  font-size: 0.75rem;
+  margin-left: 0.5rem;
+  color: var(--muted);
+}
+
+.wheel-intro {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0 0 1rem;
+}
+
+.wheel-chart {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.wheel-chart svg {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+  overflow: visible;
+}
+
+.wheel-ring { fill: none; stroke: var(--border); stroke-width: 1; }
+.wheel-spoke { stroke: var(--border); stroke-width: 1; }
+.wheel-label { font-size: 10px; fill: var(--muted); }
+.wheel-shape { fill: var(--accent); fill-opacity: 0.25; stroke: var(--accent); stroke-width: 2; }
+.wheel-dot { fill: var(--accent); }
+
+.wheel-row input[type="range"] {
+  width: 100%;
+  max-width: 220px;
+  accent-color: var(--accent);
+}
+
+.wheel-score {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--accent);
+  min-width: 2.5rem;
+  text-align: right;
+}

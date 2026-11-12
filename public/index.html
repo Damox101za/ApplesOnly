@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Life Tracker</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%8D%8E%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -20,6 +21,7 @@
     <button class="tab-btn" data-tab="habits">Habits</button>
     <button class="tab-btn" data-tab="journal">Journal</button>
     <button class="tab-btn" data-tab="goals">Goals</button>
+    <button class="tab-btn" data-tab="wheel">Wheel</button>
     <button class="tab-btn" data-tab="tasks">Tasks</button>
     <button class="tab-btn" data-tab="calendar">Calendar</button>
   </nav>
@@ -84,6 +86,7 @@
     <section id="habits" class="tab-panel">
       <form id="habitForm" class="inline-form">
         <input type="text" id="habitInput" placeholder="New habit, e.g. Drink water" required>
+        <select id="habitArea" class="area-select" aria-label="Life area"></select>
         <button type="submit">Add Habit</button>
       </form>
       <ul class="item-list" id="habitList"></ul>
@@ -111,6 +114,15 @@
         <button type="submit">Add Goal</button>
       </form>
       <ul class="item-list" id="goalList"></ul>
+    </section>
+
+    <section id="wheel" class="tab-panel">
+      <p class="wheel-intro">
+        Each area is scored 0–10 from how often you did its habits in the last 30 days.
+        Areas with no habits use the slider instead. Tag habits with an area on the Habits tab.
+      </p>
+      <div class="wheel-chart" id="wheelChart"></div>
+      <ul class="item-list" id="wheelList"></ul>
     </section>
 
     <section id="tasks" class="tab-panel">

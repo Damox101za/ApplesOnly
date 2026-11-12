@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   googleClientId: 'lifeTracker.googleClientId',
   lastGoogleSyncAt: 'lifeTracker.lastGoogleSyncAt',
   taskViewMode: 'lifeTracker.taskViewMode',
+  wheelRatings: 'lifeTracker.wheelRatings',
 };
 
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
@@ -279,7 +280,9 @@ function renderHabits() {
       <button class="check-btn ${done ? 'done' : ''}" data-id="${escapeHtml(habit.id)}" aria-label="Mark done today">${done ? '✓' : ''}</button>
       <div class="item-main">
         <div class="item-title" data-title>${escapeHtml(habit.name)}</div>
-        <div class="item-meta">🔥 ${habitStreak(habit)} day streak</div>
+        <div class="item-meta">🔥 ${habitStreak(habit)} day streak
+          <select class="area-select small" data-area="${escapeHtml(habit.id)}" aria-label="Life area">${areaOptionsHTML(habit.area)}</select>
+        </div>
       </div>
       <button class="edit-btn" data-edit="${escapeHtml(habit.id)}" aria-label="Edit">✎</button>
       <button class="delete-btn" data-delete="${escapeHtml(habit.id)}" aria-label="Delete">✕</button>
@@ -305,7 +308,8 @@ document.getElementById('habitForm').addEventListener('submit', (e) => {
   const input = document.getElementById('habitInput');
   const name = input.value.trim();
   if (!name) return;
-  habits.push({ id: uid(), name, log: [] });
+  const area = document.getElementById('habitArea').value || null;
+  habits.push({ id: uid(), name, log: [], area, createdAt: Date.now() });
   save(STORAGE_KEYS.habits, habits);
   input.value = '';
   renderHabits();
@@ -323,6 +327,16 @@ document.getElementById('habitList').addEventListener('click', (e) => {
   } else if (delBtn) {
     queueDelete('habit', habits, delBtn.dataset.delete, renderHabits);
   }
+});
+
+document.getElementById('habitList').addEventListener('change', (e) => {
+  const sel = e.target.closest('[data-area]');
+  if (!sel) return;
+  const habit = habits.find((h) => h.id === sel.dataset.area);
+  if (!habit) return;
+  habit.area = sel.value || null;
+  save(STORAGE_KEYS.habits, habits);
+  renderWheel();
 });
 
 function startHabitEdit(id) {
@@ -1478,6 +1492,7 @@ function exportBackup() {
     journal,
     goals,
     tasks,
+    wheelRatings,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -1552,6 +1567,10 @@ function confirmImport() {
   save(STORAGE_KEYS.goals, goals);
   save(STORAGE_KEYS.tasks, tasks);
   save(STORAGE_KEYS.schemaVersion, migrated.schemaVersion);
+  if (pendingImport.wheelRatings && typeof pendingImport.wheelRatings === 'object') {
+    wheelRatings = pendingImport.wheelRatings;
+    save(STORAGE_KEYS.wheelRatings, wheelRatings);
+  }
   renderHabits();
   renderJournal();
   renderGoals();
@@ -1598,6 +1617,7 @@ window.addEventListener('storage', (e) => {
   journal = load(STORAGE_KEYS.journal, []);
   goals = load(STORAGE_KEYS.goals, []);
   tasks = load(STORAGE_KEYS.tasks, []);
+  wheelRatings = load(STORAGE_KEYS.wheelRatings, {});
   renderHabits();
   renderJournal();
   renderGoals();
@@ -2007,6 +2027,7 @@ function renderDashboard() {
   renderActivity();
   renderCalendar();
   renderToday();
+  renderWheel();
 
   const backupCard = document.getElementById('backupCard');
   const backupStatus = document.getElementById('backupStatus');
@@ -2022,6 +2043,134 @@ function renderDashboard() {
     backupStatus.textContent = d === 0 ? 'Backed up today.' : `Last backed up ${d} day${d === 1 ? '' : 's'} ago.`;
   }
 }
+
+// ---------- Life Wheel ----------
+// Each life area gets a 0-10 score. If any habits are tagged with the area,
+// the score is the share of possible check-ins actually done in the last 30
+// days. Areas with no habits fall back to a manual slider rating.
+const LIFE_AREAS = [
+  { id: 'health', label: 'Health' },
+  { id: 'career', label: 'Career' },
+  { id: 'finances', label: 'Finances' },
+  { id: 'relationships', label: 'Family & Friends', short: 'Family' },
+  { id: 'romance', label: 'Romance' },
+  { id: 'growth', label: 'Personal Growth', short: 'Growth' },
+  { id: 'fun', label: 'Fun & Recreation', short: 'Fun' },
+  { id: 'environment', label: 'Environment' },
+];
+const WHEEL_WINDOW_DAYS = 30;
+
+let wheelRatings = load(STORAGE_KEYS.wheelRatings, {});
+
+function areaOptionsHTML(selected) {
+  return (
+    `<option value="">No area</option>` +
+    LIFE_AREAS.map(
+      (a) => `<option value="${a.id}"${a.id === selected ? ' selected' : ''}>${escapeHtml(a.label)}</option>`
+    ).join('')
+  );
+}
+
+function habitCompletionRate(habit) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  // Don't punish a habit for days before it existed.
+  let days = WHEEL_WINDOW_DAYS;
+  if (habit.createdAt) {
+    const created = new Date(habit.createdAt);
+    created.setHours(0, 0, 0, 0);
+    const age = Math.round((today - created) / 86400000) + 1;
+    days = Math.max(1, Math.min(days, age));
+  }
+  const start = new Date(today);
+  start.setDate(start.getDate() - (days - 1));
+  const startKey = localDateKey(start);
+  const done = new Set(habit.log.filter((d) => d >= startKey && d <= localDateKey(today))).size;
+  return done / days;
+}
+
+function wheelScores() {
+  return LIFE_AREAS.map((area) => {
+    const tagged = habits.filter((h) => h.area === area.id);
+    if (tagged.length) {
+      const avg = tagged.reduce((sum, h) => sum + habitCompletionRate(h), 0) / tagged.length;
+      return { ...area, score: Math.round(avg * 100) / 10, source: 'habits', count: tagged.length };
+    }
+    const manual = wheelRatings[area.id];
+    return { ...area, score: typeof manual === 'number' ? manual : 5, source: 'manual' };
+  });
+}
+
+function wheelSVG(scores) {
+  const size = 320;
+  const c = size / 2;
+  const r = 110;
+  const n = scores.length;
+  const pt = (i, frac) => {
+    const ang = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+    return [c + Math.cos(ang) * r * frac, c + Math.sin(ang) * r * frac];
+  };
+  let out = `<svg viewBox="0 0 ${size} ${size}" role="img" aria-label="Life wheel">`;
+  [0.2, 0.4, 0.6, 0.8, 1].forEach((f) => {
+    const ring = scores.map((_, i) => pt(i, f).map((v) => v.toFixed(1)).join(',')).join(' ');
+    out += `<polygon class="wheel-ring" points="${ring}"/>`;
+  });
+  scores.forEach((s, i) => {
+    const [x, y] = pt(i, 1);
+    out += `<line class="wheel-spoke" x1="${c}" y1="${c}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"/>`;
+    const [lx, ly] = pt(i, 1.2);
+    const anchor = Math.abs(lx - c) < 5 ? 'middle' : lx > c ? 'start' : 'end';
+    out += `<text class="wheel-label" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle">${escapeHtml(s.short || s.label)}</text>`;
+  });
+  const shape = scores
+    .map((s, i) => pt(i, Math.max(0.02, s.score / 10)).map((v) => v.toFixed(1)).join(','))
+    .join(' ');
+  out += `<polygon class="wheel-shape" points="${shape}"/>`;
+  scores.forEach((s, i) => {
+    const [x, y] = pt(i, Math.max(0.02, s.score / 10));
+    out += `<circle class="wheel-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5"/>`;
+  });
+  return out + '</svg>';
+}
+
+function renderWheel() {
+  const chart = document.getElementById('wheelChart');
+  const list = document.getElementById('wheelList');
+  if (!chart || !list) return;
+  const scores = wheelScores();
+  chart.innerHTML = wheelSVG(scores);
+  list.innerHTML = scores
+    .map((s) => {
+      const value = Number.isInteger(s.score) ? s.score : s.score.toFixed(1);
+      const detail =
+        s.source === 'habits'
+          ? `From ${s.count} habit${s.count === 1 ? '' : 's'}, last ${WHEEL_WINDOW_DAYS} days`
+          : `<input type="range" min="0" max="10" step="1" value="${s.score}" data-rate="${s.id}" aria-label="Rate ${escapeHtml(s.label)}">`;
+      return `
+      <li class="item-card wheel-row">
+        <div class="item-main">
+          <div class="item-title">${escapeHtml(s.label)}</div>
+          <div class="item-meta">${detail}</div>
+        </div>
+        <div class="wheel-score">${value}</div>
+      </li>`;
+    })
+    .join('');
+}
+
+document.getElementById('wheelList').addEventListener('input', (e) => {
+  const slider = e.target.closest('[data-rate]');
+  if (!slider) return;
+  wheelRatings[slider.dataset.rate] = Number(slider.value);
+  // Update chart + number live without rebuilding the slider mid-drag.
+  document.getElementById('wheelChart').innerHTML = wheelSVG(wheelScores());
+  slider.closest('.wheel-row').querySelector('.wheel-score').textContent = slider.value;
+});
+document.getElementById('wheelList').addEventListener('change', (e) => {
+  if (e.target.closest('[data-rate]')) save(STORAGE_KEYS.wheelRatings, wheelRatings);
+});
+
+document.getElementById('habitArea').innerHTML = areaOptionsHTML(null);
 
 function escapeHtml(str) {
   const div = document.createElement('div');
