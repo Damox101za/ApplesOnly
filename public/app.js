@@ -2474,6 +2474,7 @@ function renderActivity() {
 
   const heatmap = document.getElementById('activityHeatmap');
   const monthsRow = document.getElementById('activityMonths');
+  document.getElementById('heatmapInner').style.setProperty('--weeks', HEATMAP_WEEKS);
   heatmap.innerHTML = '';
   monthsRow.innerHTML = '';
 
@@ -2504,6 +2505,10 @@ function renderActivity() {
     }
     heatmap.appendChild(col);
   }
+
+  // On narrow screens the grid scrolls sideways; start at the most recent weeks.
+  const scroller = document.getElementById('heatmapScroll');
+  scroller.scrollLeft = scroller.scrollWidth;
 }
 
 // ---------- Calendar ----------
