@@ -1507,29 +1507,13 @@ textarea.edit-input {
 }
 
 /* ---------- Heatmap ---------- */
+/* Columns share the card width, cells stay square, and below a minimum cell
+   size the grid scrolls sideways instead of shrinking to dust. */
 .heatmap-wrap {
+  --hm-gap: 3px;
+  --hm-min: 11px;
+  --hm-labels-top: 18px;
   margin-top: 0.9rem;
-}
-
-.heatmap-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.heatmap-daylabels {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  flex-shrink: 0;
-  margin-top: 14px;
-  color: var(--muted-foreground);
-  font-size: 0.65rem;
-}
-
-.heatmap-daylabels span {
-  height: 11px;
-  line-height: 11px;
 }
 
 .heatmap-scroll {
@@ -1537,40 +1521,75 @@ textarea.edit-input {
   padding-bottom: 0.25rem;
 }
 
+/* Day labels and the chart live in one grid so their rows can never drift. */
+.heatmap-inner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: calc(2.5rem + var(--weeks, 53) * var(--hm-min) + (var(--weeks, 53) - 1) * var(--hm-gap));
+}
+
+.heatmap-daylabels {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  gap: var(--hm-gap);
+  padding-top: var(--hm-labels-top);
+  padding-right: 8px; /* opaque, so cells scrolling underneath never peek out */
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 0.65rem;
+}
+
+.heatmap-daylabels span {
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.heatmap-chart {
+  min-width: 0;
+}
+
 .heatmap-months {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 11px;
-  gap: 3px;
+  grid-template-columns: repeat(var(--weeks, 53), minmax(0, 1fr));
+  gap: var(--hm-gap);
   height: 14px;
+  margin-bottom: 4px;
   overflow: hidden;
   white-space: nowrap;
   color: var(--muted-foreground);
   font-size: 0.65rem;
+  line-height: 14px;
 }
 
 .heatmap {
   display: grid;
   grid-auto-flow: column;
-  grid-template-rows: repeat(7, 11px);
-  grid-auto-columns: 11px;
-  gap: 3px;
+  grid-template-rows: repeat(7, auto);
+  grid-template-columns: repeat(var(--weeks, 53), minmax(0, 1fr));
+  gap: var(--hm-gap);
 }
 
 .heatmap-col {
   display: contents;
 }
 
-.heatmap-cell,
-.heat-swatch {
-  width: 11px;
-  height: 11px;
+.heatmap-cell {
+  align-self: start;
+  aspect-ratio: 1;
   border-radius: 2px;
   background: var(--heat-0);
 }
 
 .heat-swatch {
   display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--heat-0);
 }
 
 .heatmap-cell.heat-empty {

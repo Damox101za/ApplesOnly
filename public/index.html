@@ -253,12 +253,16 @@
 
               <div class="card heatmap-wrap">
                 <div class="heatmap-row">
-                  <div class="heatmap-daylabels">
-                    <span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>
-                  </div>
-                  <div class="heatmap-scroll">
-                    <div class="heatmap-months" id="activityMonths"></div>
-                    <div class="heatmap" id="activityHeatmap"></div>
+                  <div class="heatmap-scroll" id="heatmapScroll">
+                    <div class="heatmap-inner" id="heatmapInner">
+                      <div class="heatmap-daylabels">
+                        <span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>
+                      </div>
+                      <div class="heatmap-chart">
+                        <div class="heatmap-months" id="activityMonths"></div>
+                        <div class="heatmap" id="activityHeatmap"></div>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div class="heatmap-legend">
