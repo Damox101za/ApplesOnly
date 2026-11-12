@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Life Tracker</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%8D%8E%3C/text%3E%3C/svg%3E">
-  <script>try{var t=JSON.parse(localStorage.getItem('lifeTracker.theme'));if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;}catch(e){}</script>
+  <script>try{var t=JSON.parse(localStorage.getItem('lifeTracker.theme'));if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;if(JSON.parse(localStorage.getItem('lifeTracker.background'))==='off')document.documentElement.dataset.bg='off';}catch(e){}</script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -43,6 +43,15 @@
               </div>
               <button type="submit" class="quick-add-btn">Add</button>
             </form>
+            <div class="account" id="account" hidden>
+              <button type="button" id="accountBtn" class="icon-btn account-btn" aria-haspopup="true" aria-expanded="false" aria-controls="accountMenu" aria-label="Account"></button>
+              <div class="account-menu" id="accountMenu" hidden>
+                <div class="account-name" id="accountName"></div>
+                <div class="account-email" id="accountEmail"></div>
+                <button type="button" id="signOutBtn" class="secondary-btn">Sign out</button>
+              </div>
+            </div>
+            <button type="button" id="bgToggle" class="icon-btn" aria-pressed="true" aria-label="Turn the animated background off" title="Turn the animated background off"></button>
             <button type="button" id="themeToggle" class="icon-btn" aria-label="Toggle theme"></button>
           </div>
         </header>
@@ -50,12 +59,13 @@
         <div class="warning-banner" id="warningBanner" role="status"></div>
 
         <main id="main" tabindex="-1">
+          <div class="hero" id="pageHero">
+            <canvas class="hero-canvas" id="heroCanvas" aria-hidden="true"></canvas>
+            <h2 class="hero-title" id="heroTitle"></h2>
+            <p class="hero-sub" id="heroSub"></p>
+          </div>
+
           <section id="today" class="tab-panel active">
-            <div class="hero" id="todayHero">
-              <canvas class="hero-canvas" id="heroCanvas" aria-hidden="true"></canvas>
-              <h2 class="hero-title" id="heroTitle"></h2>
-              <p class="hero-sub" id="heroSub"></p>
-            </div>
             <div id="todayContent"></div>
           </section>
 
