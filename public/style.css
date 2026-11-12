@@ -1123,3 +1123,23 @@ select.edit-input {
   min-width: 2.5rem;
   text-align: right;
 }
+
+/* ---------- Quick Add ---------- */
+.quick-add-wrap {
+  max-width: 720px;
+  margin: 0 auto 1.25rem;
+}
+
+.quick-add-wrap .inline-form {
+  margin-bottom: 0.4rem;
+}
+
+.quick-add-preview {
+  min-height: 1.2rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.quick-add-preview.error {
+  color: var(--danger);
+}
