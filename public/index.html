@@ -9,13 +9,14 @@
 <body>
   <header class="app-header">
     <h1>Life Tracker</h1>
-    <p class="subtitle">Habits, journal &amp; goals, all in one place.</p>
+    <p class="subtitle">Habits, journal, goals &amp; tasks, all in one place.</p>
   </header>
 
   <div class="warning-banner" id="warningBanner"></div>
 
   <nav class="tabs" id="tabs">
-    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn active" data-tab="today">Today</button>
+    <button class="tab-btn" data-tab="dashboard">Dashboard</button>
     <button class="tab-btn" data-tab="habits">Habits</button>
     <button class="tab-btn" data-tab="journal">Journal</button>
     <button class="tab-btn" data-tab="goals">Goals</button>
@@ -24,7 +25,11 @@
   </nav>
 
   <main>
-    <section id="dashboard" class="tab-panel active">
+    <section id="today" class="tab-panel active">
+      <div id="todayContent"></div>
+    </section>
+
+    <section id="dashboard" class="tab-panel">
       <div class="card-grid" id="dashboardGrid"></div>
 
       <section class="activity-section">
@@ -162,6 +167,20 @@
       <form id="taskForm" class="inline-form">
         <input type="text" id="taskInput" placeholder="New task, e.g. Renew passport" required>
         <input type="date" id="taskDate">
+        <select id="taskPriority" aria-label="Priority">
+          <option value="high">High priority</option>
+          <option value="medium" selected>Medium priority</option>
+          <option value="low">Low priority</option>
+        </select>
+        <select id="taskRepeat" aria-label="Repeat">
+          <option value="">Does not repeat</option>
+          <option value="daily">Repeats daily</option>
+          <option value="weekly">Repeats weekly</option>
+          <option value="monthly">Repeats monthly</option>
+        </select>
+        <select id="taskGoal" aria-label="Goal">
+          <option value="">No goal</option>
+        </select>
         <button type="submit">Add Task</button>
       </form>
 
