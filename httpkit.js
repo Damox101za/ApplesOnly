@@ -18,7 +18,34 @@ function sameOrigin(req) {
   }
 }
 
+function tooLarge() {
+  return Object.assign(new Error('Request too large.'), { status: 413 });
+}
+
+// Some hosts (Vercel Functions) read and parse a JSON body before the handler
+// runs, leaving nothing on the stream. Accept that form too.
+function takeParsedBody(body, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let value = body;
+    if (Buffer.isBuffer(value)) value = value.toString('utf8');
+    if (typeof value === 'string') {
+      if (Buffer.byteLength(value) > maxBytes) return reject(tooLarge());
+      try {
+        return resolve(JSON.parse(value || '{}'));
+      } catch {
+        return reject(Object.assign(new Error('Invalid JSON.'), { status: 400 }));
+      }
+    }
+    if (value && typeof value === 'object') {
+      if (Buffer.byteLength(JSON.stringify(value)) > maxBytes) return reject(tooLarge());
+      return resolve(value);
+    }
+    return reject(Object.assign(new Error('Invalid JSON.'), { status: 400 }));
+  });
+}
+
 function readJsonBody(req, maxBytes) {
+  if (req.body !== undefined && req.body !== null) return takeParsedBody(req.body, maxBytes);
   return new Promise((resolve, reject) => {
     let size = 0;
     let done = false;
@@ -29,7 +56,7 @@ function readJsonBody(req, maxBytes) {
       if (size > maxBytes) {
         done = true;
         req.pause(); // stop reading; the handler answers 413 and then drops the socket
-        reject(Object.assign(new Error('Request too large.'), { status: 413 }));
+        reject(tooLarge());
         return;
       }
       chunks.push(chunk);
@@ -52,10 +79,21 @@ function readJsonBody(req, maxBytes) {
   });
 }
 
+// The address of whoever is calling. Behind Vercel's proxy the socket is the
+// proxy, so use the headers Vercel sets itself; everywhere else use the socket.
+function clientIp(req) {
+  if (process.env.VERCEL) {
+    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const ip = req.headers['x-real-ip'] || forwarded;
+    if (ip) return String(ip);
+  }
+  return req.socket.remoteAddress || 'unknown';
+}
+
 // For a 413, answer first and only then drop the connection.
 function closeAfterResponse(req, res) {
   res.setHeader('Connection', 'close');
   res.on('finish', () => req.destroy());
 }
 
-module.exports = { sendJson, sameOrigin, readJsonBody, closeAfterResponse };
+module.exports = { sendJson, sameOrigin, readJsonBody, closeAfterResponse, clientIp };

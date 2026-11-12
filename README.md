@@ -42,8 +42,9 @@ Data is stored locally in the browser (`localStorage`) — no database.
 
 ## Sign in with Google (optional)
 
-Set `GOOGLE_CLIENT_ID` on the server and the app asks people to sign in with
-Google before it loads. Without it the app stays open, exactly as before. Any
+Set `GOOGLE_CLIENT_ID` **and** `SESSION_SECRET` and the app asks people to sign
+in with Google before it loads. With either one missing the app stays open,
+exactly as before, so a half-finished setup can never lock anyone out. Any
 Google account can sign in; your tasks, habits and journal still live in each
 person's own browser, and signing out does not erase them.
 
@@ -64,16 +65,34 @@ npm start
    needed.
 3. On the **OAuth consent screen**, choose *External* and publish the app. While
    it is in *Testing*, only the test users you list can sign in.
-4. Set `GOOGLE_CLIENT_ID` and `SESSION_SECRET` (a long random string; without it
-   everyone is signed out whenever the server restarts). On Azure these are app
+4. Set `GOOGLE_CLIENT_ID` and `SESSION_SECRET` (a long random string, at least 16
+   characters; without it sign-in stays off). On Azure these are app
    settings instead of a `.env` file. Use a Client ID made for this app; Google
    answers `Error 401: invalid_client` when the ID isn't a real, current one.
 
 How it works: the server checks Google's ID token (signature, issuer, audience,
 expiry, verified email) and issues its own signed, HttpOnly session cookie that
 lasts 7 days. Nothing is stored on the server. Sign-in attempts are rate-limited.
-Static hosts without the Node server (such as a Vercel preview) have no sign-in
-and stay open.
+
+### On Vercel
+
+Vercel serves `public/` as static files, so the Node server doesn't run there.
+Instead `middleware.js` (Vercel Routing Middleware, which runs before static
+files) guards the whole site, and `api/auth/` and `api/ai/` are Vercel
+Functions. They use the same code as the Node server (`gate.js`, `auth.js`).
+
+1. In the Vercel project settings, add `GOOGLE_CLIENT_ID` and `SESSION_SECRET`
+   for the **Production** environment only. The names must match exactly.
+   Generate the secret with
+   `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+   You do not need the Google *client secret*.
+2. In Google Cloud Console, add your production address (for example
+   `https://applesonly.vercel.app`) to **Authorized JavaScript origins**.
+3. Redeploy. Environment variables only apply to new deployments.
+
+Preview deployments stay open (and are already behind Vercel's own login):
+Google doesn't allow wildcard origins, so previews couldn't sign in anyway.
+To turn sign-in off again, remove `SESSION_SECRET` (or the client ID) and redeploy.
 
 ## AI helpers (currently turned off)
 
