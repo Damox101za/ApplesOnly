@@ -3155,6 +3155,11 @@ async function aiRequest(kind, body) {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    showWarning('Your session has expired. Taking you to sign in…');
+    setTimeout(() => location.replace('/login.html'), 1500);
+    throw new Error('Your session has expired.');
+  }
   if (!res.ok) throw new Error(data.error || `AI request failed (${res.status})`);
   return data;
 }
@@ -3341,6 +3346,75 @@ document.getElementById('summaryBtn').addEventListener('click', (e) => {
   });
 });
 
+// ---------- Account (shown only when the server has Google sign-in on) ----------
+const accountEl = document.getElementById('account');
+const accountBtn = document.getElementById('accountBtn');
+const accountMenu = document.getElementById('accountMenu');
+
+function setAccountMenu(open) {
+  accountMenu.hidden = !open;
+  accountBtn.setAttribute('aria-expanded', String(open));
+}
+
+async function initAccount() {
+  let user = null;
+  try {
+    const res = await fetch('/api/auth/me');
+    if (res.ok) user = (await res.json()).user;
+  } catch {
+    user = null;
+  }
+  if (!user) return; // login is off, or this is a static host without the server
+
+  const initial = (user.name || user.email || '?').trim().charAt(0).toUpperCase();
+  const showInitial = () => {
+    accountBtn.textContent = initial;
+  };
+  accountBtn.textContent = '';
+  if (user.picture) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    img.addEventListener('error', showInitial);
+    img.src = user.picture;
+    accountBtn.appendChild(img);
+  } else {
+    showInitial();
+  }
+  accountBtn.setAttribute('aria-label', `Account: ${user.email}`);
+  document.getElementById('accountName').textContent = user.name;
+  document.getElementById('accountEmail').textContent = user.email;
+  accountEl.hidden = false;
+}
+
+accountBtn.addEventListener('click', () => setAccountMenu(accountMenu.hidden));
+document.addEventListener('click', (e) => {
+  if (!accountMenu.hidden && !accountEl.contains(e.target)) setAccountMenu(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !accountMenu.hidden) {
+    setAccountMenu(false);
+    accountBtn.focus();
+  }
+});
+
+document.getElementById('signOutBtn').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (!res.ok) throw new Error('logout failed');
+    location.replace('/login.html');
+  } catch {
+    btn.disabled = false;
+    showWarning("Couldn't sign out. Please try again.");
+  }
+});
+
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
@@ -3357,3 +3431,4 @@ renderProjects();
 renderMoney();
 renderDashboard();
 detectAI();
+initAccount();

@@ -36,6 +36,41 @@ served by a small dependency-free Node.js server.
 
 Data is stored locally in the browser (`localStorage`) — no database.
 
+## Sign in with Google (optional)
+
+Set `GOOGLE_CLIENT_ID` on the server and the app asks people to sign in with
+Google before it loads. Without it the app stays open, exactly as before. Any
+Google account can sign in; your tasks, habits and journal still live in each
+person's own browser, and signing out does not erase them.
+
+Put the settings in a `.env` file (copy `.env.example`; it is git-ignored and
+never served) or export them as environment variables. Real environment
+variables always win over `.env`, so hosted settings are never overridden.
+
+```bash
+cp .env.example .env     # then fill in GOOGLE_CLIENT_ID and SESSION_SECRET
+npm start
+```
+
+1. In [Google Cloud Console](https://console.cloud.google.com/) go to **APIs &
+   Services → Credentials → Create credentials → OAuth client ID**, and choose
+   **Web application**.
+2. Under **Authorized JavaScript origins** add every address you use, for
+   example `http://localhost:1337` and your deployed URL. No redirect URIs are
+   needed.
+3. On the **OAuth consent screen**, choose *External* and publish the app. While
+   it is in *Testing*, only the test users you list can sign in.
+4. Set `GOOGLE_CLIENT_ID` and `SESSION_SECRET` (a long random string; without it
+   everyone is signed out whenever the server restarts). On Azure these are app
+   settings instead of a `.env` file. Use a Client ID made for this app; Google
+   answers `Error 401: invalid_client` when the ID isn't a real, current one.
+
+How it works: the server checks Google's ID token (signature, issuer, audience,
+expiry, verified email) and issues its own signed, HttpOnly session cookie that
+lasts 7 days. Nothing is stored on the server. Sign-in attempts are rate-limited.
+Static hosts without the Node server (such as a Vercel preview) have no sign-in
+and stay open.
+
 ## AI helpers (currently turned off)
 
 The code for three helpers is still here — **Plan with AI** (Goals), and a
