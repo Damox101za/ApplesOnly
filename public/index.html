@@ -26,6 +26,14 @@
     <button class="tab-btn" data-tab="calendar">Calendar</button>
   </nav>
 
+  <div class="quick-add-wrap">
+    <form id="quickAddForm" class="inline-form" autocomplete="off">
+      <input type="text" id="quickAddInput" placeholder="Quick add a task, e.g. pay rent every month !high" aria-label="Quick add a task">
+      <button type="submit">Add</button>
+    </form>
+    <div class="quick-add-preview" id="quickAddPreview" aria-live="polite"></div>
+  </div>
+
   <main>
     <section id="today" class="tab-panel active">
       <div id="todayContent"></div>

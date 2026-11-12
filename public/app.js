@@ -1152,6 +1152,21 @@ document.getElementById('taskViewToggle').addEventListener('click', (e) => {
   renderTasksView();
 });
 
+// Shared by the Tasks form and Quick Add. Returns the task, or null if it
+// couldn't be saved (e.g. storage full).
+function addTask(fields) {
+  const task = makeTask(fields);
+  tasks.push(task);
+  if (!save(STORAGE_KEYS.tasks, tasks)) {
+    tasks.pop();
+    return null;
+  }
+  renderTasksAndGoals();
+  renderDashboard();
+  pushTaskToCalendar(task);
+  return task;
+}
+
 document.getElementById('taskForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = document.getElementById('taskInput');
@@ -1162,7 +1177,7 @@ document.getElementById('taskForm').addEventListener('submit', (e) => {
   const prioritySel = document.getElementById('taskPriority');
   const goalSel = document.getElementById('taskGoal');
   const recurrence = repeatSel.value || null;
-  const task = makeTask({
+  const task = addTask({
     title,
     // A repeating task needs an anchor date to repeat from.
     dueDate: dateInput.value || (recurrence ? todayKey() : null),
@@ -1170,20 +1185,12 @@ document.getElementById('taskForm').addEventListener('submit', (e) => {
     recurrence,
     goalId: goalSel.value || null,
   });
-  tasks.push(task);
-  const ok = save(STORAGE_KEYS.tasks, tasks);
-  if (!ok) {
-    tasks.pop();
-    return;
-  }
+  if (!task) return;
   input.value = '';
   dateInput.value = '';
   repeatSel.value = '';
   prioritySel.value = 'medium';
   goalSel.value = '';
-  renderTasksAndGoals();
-  renderDashboard();
-  pushTaskToCalendar(task);
 });
 
 document.getElementById('taskList').addEventListener('click', (e) => {
@@ -1317,6 +1324,227 @@ function startTaskEdit(id) {
     });
   });
 }
+
+// ---------- Quick Add ----------
+// Rule-based natural-language parsing (no AI, works offline). Recognises:
+//   dates:      today, tomorrow, in 3 days, next week, friday, next friday,
+//               dec 25, 25 dec, 2026-12-25 (optionally after by/on/due/before)
+//   repeats:    every day|week|month, every monday, or a trailing
+//               daily|weekly|monthly
+//   priority:   !high !medium !low, or "high priority"
+//   goal:       #run matches a goal whose title contains "run"
+const QA_WEEKDAYS = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+const QA_WEEKDAY_ABBR = { sun: 0, mon: 1, tue: 2, tues: 2, wed: 3, weds: 3, thu: 4, thur: 4, thurs: 4, fri: 5, sat: 6 };
+const QA_MONTHS = {
+  january: 0, jan: 0, february: 1, feb: 1, march: 2, mar: 2, april: 3, apr: 3, may: 4, june: 5, jun: 5,
+  july: 6, jul: 6, august: 7, aug: 7, september: 8, sept: 8, sep: 8, october: 9, oct: 9,
+  november: 10, nov: 10, december: 11, dec: 11,
+};
+const QA_PREP = '(?:(?:by|on|due|due on|before|until)\\s+)?';
+const qaAlt = (obj) => Object.keys(obj).sort((a, b) => b.length - a.length).join('|');
+
+function parseQuickAdd(input, now = new Date(), goalList = goals) {
+  let text = ` ${input} `;
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const result = { title: '', dueDate: null, recurrence: null, priority: 'medium', goalId: null, unmatchedGoal: null };
+  const take = (re) => {
+    const m = text.match(re);
+    if (m) text = text.replace(re, ' ');
+    return m;
+  };
+  const shift = (n) => {
+    const d = new Date(base);
+    d.setDate(d.getDate() + n);
+    return d;
+  };
+  // Next occurrence of a weekday. includeToday=false means strictly after today.
+  const weekdayDate = (target, includeToday) => {
+    let diff = (target - base.getDay() + 7) % 7;
+    if (diff === 0 && !includeToday) diff = 7;
+    return shift(diff);
+  };
+  const mondayOf = (d) => {
+    const m = new Date(d);
+    m.setDate(m.getDate() - ((m.getDay() + 6) % 7));
+    return localDateKey(m);
+  };
+
+  // Priority
+  let m;
+  if ((m = take(/\s!(high|h|medium|med|m|low|l)(?=\s)/i))) {
+    const k = m[1].toLowerCase()[0];
+    result.priority = k === 'h' ? 'high' : k === 'l' ? 'low' : 'medium';
+  } else if ((m = take(/\b(high|medium|low)\s+priority\b/i))) {
+    result.priority = m[1].toLowerCase();
+  }
+
+  // Goal (#tag)
+  const norm = (str) => str.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  text = text.replace(/\s#([\p{L}\p{N}_-]+)(?=\s)/gu, (whole, tag) => {
+    const tagN = norm(tag);
+    if (result.goalId || tagN.length < 2) return whole;
+    const matches = goalList.filter((g) => norm(g.title).includes(tagN));
+    const best = matches.find((g) => norm(g.title).startsWith(tagN)) || matches[0];
+    if (best) {
+      result.goalId = best.id;
+      return ' ';
+    }
+    result.unmatchedGoal = result.unmatchedGoal || tag;
+    return whole;
+  });
+
+  // Repeat
+  let anchorWeekday = null;
+  if ((m = take(new RegExp(`\\bevery\\s+(${qaAlt(QA_WEEKDAYS)})\\b`, 'i')))) {
+    result.recurrence = 'weekly';
+    anchorWeekday = QA_WEEKDAYS[m[1].toLowerCase()];
+  } else if ((m = take(/\bevery\s+(day|week|month)\b/i))) {
+    result.recurrence = { day: 'daily', week: 'weekly', month: 'monthly' }[m[1].toLowerCase()];
+  } else if ((m = take(/\s(daily|weekly|monthly)\s*$/i))) {
+    result.recurrence = m[1].toLowerCase();
+  }
+
+  // Due date
+  const fromKey = (d) => localDateKey(d);
+  if ((m = take(/\b(\d{4})-(\d{2})-(\d{2})\b/))) {
+    const d = new Date(+m[1], +m[2] - 1, +m[3]);
+    if (d.getMonth() === +m[2] - 1) result.dueDate = fromKey(d);
+  } else if ((m = take(new RegExp(`${QA_PREP}\\bin\\s+(\\d{1,3})\\s+(day|days|week|weeks|month|months)\\b`, 'i')))) {
+    const n = +m[1];
+    const unit = m[2].toLowerCase();
+    if (unit.startsWith('month')) {
+      const d = new Date(base);
+      d.setMonth(d.getMonth() + n);
+      result.dueDate = fromKey(d);
+    } else {
+      result.dueDate = fromKey(shift(unit.startsWith('week') ? n * 7 : n));
+    }
+  } else if (take(new RegExp(`${QA_PREP}\\bday after tomorrow\\b`, 'i'))) {
+    result.dueDate = fromKey(shift(2));
+  } else if (take(new RegExp(`${QA_PREP}\\b(?:tomorrow|tmrw|tmr)\\b`, 'i'))) {
+    result.dueDate = fromKey(shift(1));
+  } else if (take(new RegExp(`${QA_PREP}\\b(?:today|tonight)\\b`, 'i'))) {
+    result.dueDate = fromKey(base);
+  } else if (take(new RegExp(`${QA_PREP}\\bnext\\s+week\\b`, 'i'))) {
+    result.dueDate = fromKey(shift(7));
+  } else if (take(new RegExp(`${QA_PREP}\\bnext\\s+month\\b`, 'i'))) {
+    const d = new Date(base);
+    d.setMonth(d.getMonth() + 1);
+    result.dueDate = fromKey(d);
+  } else {
+    const monthRe = new RegExp(
+      `${QA_PREP}\\b(?:(${qaAlt(QA_MONTHS)})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?|(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${qaAlt(QA_MONTHS)}))\\b`,
+      'i'
+    );
+    const mm = text.match(monthRe);
+    const monthIdx = mm && QA_MONTHS[(mm[1] || mm[4]).toLowerCase()];
+    const dayNum = mm && +(mm[2] || mm[3]);
+    if (mm && dayNum >= 1 && dayNum <= 31) {
+      let d = new Date(base.getFullYear(), monthIdx, dayNum);
+      if (d.getMonth() === monthIdx) {
+        if (d < base) d = new Date(base.getFullYear() + 1, monthIdx, dayNum);
+        if (d.getMonth() === monthIdx) {
+          text = text.replace(monthRe, ' ');
+          result.dueDate = fromKey(d);
+        }
+      }
+    }
+    if (!result.dueDate) {
+      const fullRe = new RegExp(`${QA_PREP}\\b(?:(next|this)\\s+)?(${qaAlt(QA_WEEKDAYS)})\\b`, 'i');
+      const abbrRe = new RegExp(`(?:by|on|next|this|due|before|until)\\s+(?:(next|this)\\s+)?(${qaAlt(QA_WEEKDAY_ABBR)})\\b`, 'i');
+      const wm = take(fullRe) || take(abbrRe);
+      if (wm) {
+        const wd = QA_WEEKDAYS[wm[2].toLowerCase()] ?? QA_WEEKDAY_ABBR[wm[2].toLowerCase()];
+        let d = weekdayDate(wd, false);
+        // "next friday" means the one in next week, not later this week.
+        if (wm[1] && wm[1].toLowerCase() === 'next' && mondayOf(d) === mondayOf(base)) d = shift(Math.round((d - base) / 86400000) + 7);
+        result.dueDate = fromKey(d);
+      }
+    }
+  }
+
+  if (result.recurrence && !result.dueDate) {
+    result.dueDate = fromKey(anchorWeekday !== null ? weekdayDate(anchorWeekday, true) : base);
+  }
+
+  let title = text.replace(/\s+/g, ' ').trim().replace(/^[\s,;:.\-–]+|[\s,;:\-–]+$/g, '');
+  if (title) title = title[0].toUpperCase() + title.slice(1);
+  result.title = title;
+  return result;
+}
+
+function describeQuickAdd(parsed) {
+  const bits = [`“${parsed.title}”`];
+  if (parsed.dueDate) {
+    bits.push(
+      'due ' +
+        new Date(`${parsed.dueDate}T00:00:00`).toLocaleDateString(undefined, {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+        })
+    );
+  }
+  if (parsed.recurrence) bits.push(`🔁 ${RECURRENCE_LABELS[parsed.recurrence]}`);
+  if (parsed.priority !== 'medium') bits.push(`${PRIORITY_LABELS[parsed.priority]} priority`);
+  const goal = parsed.goalId && goals.find((g) => g.id === parsed.goalId);
+  if (goal) bits.push(`🎯 ${goal.title}`);
+  return bits.join(' · ');
+}
+
+const quickAddInput = document.getElementById('quickAddInput');
+const quickAddPreview = document.getElementById('quickAddPreview');
+let quickAddStatusTimer = null;
+
+function setQuickAddPreview(text, isError = false) {
+  clearTimeout(quickAddStatusTimer);
+  quickAddPreview.textContent = text;
+  quickAddPreview.classList.toggle('error', isError);
+}
+
+quickAddInput.addEventListener('input', () => {
+  const value = quickAddInput.value.trim();
+  if (!value) {
+    setQuickAddPreview('');
+    return;
+  }
+  const parsed = parseQuickAdd(value);
+  if (!parsed.title) {
+    setQuickAddPreview('Add a task name, e.g. “pay rent tomorrow”.');
+    return;
+  }
+  const note = parsed.unmatchedGoal ? ` (no goal matches #${parsed.unmatchedGoal})` : '';
+  setQuickAddPreview(`Will add ${describeQuickAdd(parsed)}${note}`);
+});
+
+quickAddInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    quickAddInput.value = '';
+    setQuickAddPreview('');
+  }
+});
+
+document.getElementById('quickAddForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const value = quickAddInput.value.trim();
+  if (!value) return;
+  const parsed = parseQuickAdd(value);
+  if (!parsed.title) {
+    setQuickAddPreview('Add a task name first, e.g. “pay rent tomorrow”.', true);
+    return;
+  }
+  const task = addTask({
+    title: parsed.title,
+    dueDate: parsed.dueDate,
+    priority: parsed.priority,
+    recurrence: parsed.recurrence,
+    goalId: parsed.goalId,
+  });
+  if (!task) return;
+  quickAddInput.value = '';
+  setQuickAddPreview(`Added ${describeQuickAdd(parsed)}`);
+  quickAddStatusTimer = setTimeout(() => setQuickAddPreview(''), 5000);
+});
 
 // ---------- .ics import / export ----------
 // Lets tasks round-trip through any calendar app (not just Google): export
