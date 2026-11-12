@@ -4,7 +4,7 @@
 // user's own account (see the open issue), leave AI_ENABLED unset so nobody
 // else's requests can spend the owner's key. The key never reaches the browser.
 
-const { sendJson, sameOrigin, readJsonBody, closeAfterResponse } = require('./httpkit');
+const { sendJson, sameOrigin, readJsonBody, closeAfterResponse, clientIp } = require('./httpkit');
 
 const API_BASE = process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com/v1beta';
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -27,10 +27,6 @@ function isEnabled() {
 
 if (process.env.GEMINI_API_KEY && process.env.AI_ENABLED !== 'true') {
   console.log('AI helpers are turned off. Set AI_ENABLED=true to turn them on.');
-}
-
-function clientIp(req) {
-  return req.socket.remoteAddress || 'unknown';
 }
 
 function underLimit(req) {

@@ -3,12 +3,14 @@
 // Google Identity Services and posts it here; we verify it and hand back our
 // own signed, HttpOnly session cookie. Nothing is stored server-side.
 //
-// Turned on by setting GOOGLE_CLIENT_ID. Without it the app stays open, as it
-// was before login existed. Set SESSION_SECRET to a long random string so
-// sessions survive restarts (and work across several instances).
+// Turned on by setting BOTH GOOGLE_CLIENT_ID and SESSION_SECRET (a long random
+// string, at least 16 characters). With either missing the app stays open, as
+// it was before login existed, so a half-finished setup can never lock anyone
+// out. Sessions are stateless cookies signed with SESSION_SECRET, so they work
+// across restarts and across serverless instances.
 
 const crypto = require('crypto');
-const { sendJson, sameOrigin, readJsonBody, closeAfterResponse } = require('./httpkit');
+const { sendJson, sameOrigin, readJsonBody, closeAfterResponse, clientIp } = require('./httpkit');
 
 const JWKS_URL = process.env.GOOGLE_JWKS_URL || 'https://www.googleapis.com/oauth2/v3/certs';
 const ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
@@ -18,6 +20,7 @@ const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 8 * 1024;
 const MAX_TOKEN_CHARS = 4096;
 const CLOCK_SKEW_MS = 60 * 1000;
+const SECRET_MIN_CHARS = 16;
 
 const JWKS_TTL_MS = 60 * 60 * 1000;
 const JWKS_MIN_REFRESH_MS = 60 * 1000;
@@ -32,25 +35,25 @@ function clientId() {
   return process.env.GOOGLE_CLIENT_ID || '';
 }
 
-function isEnabled() {
-  return Boolean(clientId());
+function sessionSecret() {
+  return process.env.SESSION_SECRET || '';
 }
 
-let secret = process.env.SESSION_SECRET || '';
-if (isEnabled()) {
-  if (!secret) {
-    console.warn('SESSION_SECRET is not set: everyone will be signed out on every restart. Set it to a long random string.');
-  } else if (secret.length < 16) {
-    console.warn('SESSION_SECRET is short. Use at least 16 random characters.');
-  }
+function isEnabled() {
+  return Boolean(clientId()) && sessionSecret().length >= SECRET_MIN_CHARS;
 }
-if (!secret) secret = crypto.randomBytes(32).toString('hex');
+
+if (clientId() && !isEnabled()) {
+  console.warn(
+    `Sign-in is OFF: GOOGLE_CLIENT_ID is set, but SESSION_SECRET is missing or shorter than ${SECRET_MIN_CHARS} characters.`
+  );
+}
 
 // ---------- small helpers ----------
 const b64u = (input) => Buffer.from(input).toString('base64url');
 
 function hmac(data) {
-  return crypto.createHmac('sha256', secret).update(data).digest('base64url');
+  return crypto.createHmac('sha256', sessionSecret()).update(data).digest('base64url');
 }
 
 function safeEqual(a, b) {
@@ -63,9 +66,9 @@ function authError(message, status = 401) {
   return Object.assign(new Error(message), { status });
 }
 
-function parseCookies(req) {
+function parseCookies(header) {
   const out = {};
-  String(req.headers.cookie || '')
+  String(header || '')
     .split(';')
     .forEach((part) => {
       const i = part.indexOf('=');
@@ -102,11 +105,15 @@ function readSession(token) {
   }
 }
 
-// The signed-in user for this request, or null (always null when login is off).
-function getSession(req) {
+// The signed-in user for a Cookie header, or null (always null when login is off).
+function sessionFromCookieHeader(header) {
   if (!isEnabled()) return null;
-  const raw = parseCookies(req)[COOKIE_NAME];
+  const raw = parseCookies(header)[COOKIE_NAME];
   return raw ? readSession(raw) : null;
+}
+
+function getSession(req) {
+  return sessionFromCookieHeader(req.headers.cookie);
 }
 
 // ---------- verifying Google's ID token ----------
@@ -192,7 +199,7 @@ async function verifyIdToken(token) {
 // ---------- routes ----------
 function underLoginLimit(req) {
   const now = Date.now();
-  const ip = req.socket.remoteAddress || 'unknown';
+  const ip = clientIp(req);
   const recent = (loginHits.get(ip) || []).filter((t) => now - t < LOGIN_WINDOW_MS);
   if (recent.length >= LOGIN_LIMIT) {
     loginHits.set(ip, recent);
@@ -254,4 +261,4 @@ async function handle(req, res, pathname) {
   return sendJson(res, 404, { error: 'Not found.' });
 }
 
-module.exports = { handle, getSession, isEnabled };
+module.exports = { handle, getSession, sessionFromCookieHeader, isEnabled };
