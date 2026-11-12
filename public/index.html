@@ -51,6 +51,11 @@
 
         <main id="main" tabindex="-1">
           <section id="today" class="tab-panel active">
+            <div class="hero" id="todayHero">
+              <canvas class="hero-canvas" id="heroCanvas" aria-hidden="true"></canvas>
+              <h2 class="hero-title" id="heroTitle"></h2>
+              <p class="hero-sub" id="heroSub"></p>
+            </div>
             <div id="todayContent"></div>
           </section>
 
@@ -376,6 +381,7 @@
   </div>
 
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="background.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -40,6 +40,10 @@
   --heat-3: color-mix(in srgb, var(--primary) 75%, var(--background));
   --heat-4: var(--primary);
 
+  --hero-a: #c7d2fe;
+  --hero-b: #a5f3fc;
+  --hero-c: #fbcfe8;
+
   --sidebar-width: 16rem;
   --bottom-nav: 4rem;
 }
@@ -67,6 +71,9 @@
   --warn-ring: rgb(251 191 36 / 0.3);
   --shadow-xs: none;
   --shadow-md: 0 8px 24px rgb(0 0 0 / 0.5);
+  --hero-a: #312e81;
+  --hero-b: #134e4a;
+  --hero-c: #581c87;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -93,6 +100,9 @@
     --warn-ring: rgb(251 191 36 / 0.3);
     --shadow-xs: none;
     --shadow-md: 0 8px 24px rgb(0 0 0 / 0.5);
+    --hero-a: #312e81;
+    --hero-b: #134e4a;
+    --hero-c: #581c87;
   }
 }
 
@@ -875,18 +885,44 @@ button:disabled {
 
 /* ---------- Hero + KPI ---------- */
 .hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 7.5rem;
   margin-bottom: 1.25rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(60% 120% at 12% 0%, var(--hero-a), transparent 70%),
+    radial-gradient(55% 120% at 90% 10%, var(--hero-c), transparent 70%),
+    radial-gradient(70% 110% at 55% 110%, var(--hero-b), transparent 70%),
+    var(--card);
+}
+
+/* The shader paints over the CSS gradient above, which stays as the fallback. */
+.hero-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+}
+
+.hero.hero-static .hero-canvas {
+  display: none;
 }
 
 .hero-title {
-  font-size: 1.375rem;
+  font-size: 1.5rem;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .hero-sub {
   margin: 0.25rem 0 0;
-  color: var(--muted-foreground);
+  max-width: 40rem;
+  color: color-mix(in srgb, var(--foreground) 80%, transparent);
 }
 
 .hero-sub strong {

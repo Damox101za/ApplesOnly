@@ -2742,11 +2742,11 @@ function renderToday() {
   }
   const empty = !overdue.length && !dueToday.length && !habitStates.length;
 
+  // The hero lives outside todayContent so its canvas survives re-renders.
+  document.getElementById('heroTitle').textContent = greeting;
+  document.getElementById('heroSub').innerHTML = `${escapeHtml(dateLabel)} · ${sentence}`;
+
   root.innerHTML = `
-    <div class="hero">
-      <h2 class="hero-title">${greeting}</h2>
-      <p class="hero-sub">${escapeHtml(dateLabel)} · ${sentence}</p>
-    </div>
     <div class="kpi-strip">
       ${kpiHTML({
         icon: 'check-circle',
@@ -3348,6 +3348,7 @@ function escapeHtml(str) {
 }
 
 applyTheme(load(STORAGE_KEYS.theme, null));
+if (window.AnimatedBackground) AnimatedBackground.mount(document.getElementById('heroCanvas'));
 renderHabits();
 renderJournal();
 renderGoals();
