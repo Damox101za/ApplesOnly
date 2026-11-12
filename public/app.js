@@ -15,7 +15,7 @@ const STORAGE_KEYS = {
 
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 // ---------- Storage helpers ----------
 function safeParse(raw, fallback) {
@@ -104,6 +104,16 @@ const MIGRATIONS = {
     });
     return data;
   },
+  3(data) {
+    // Tasks gain priority, optional recurrence, and an optional link to a goal.
+    data.tasks = (data.tasks || []).map((t) => {
+      if (t.priority === undefined) t.priority = 'medium';
+      if (t.recurrence === undefined) t.recurrence = null;
+      if (t.goalId === undefined) t.goalId = null;
+      return t;
+    });
+    return data;
+  },
 };
 
 function migrate(data) {
@@ -179,6 +189,20 @@ function finalizePendingDelete() {
   saveList(type);
   if (type === 'task' && item.googleEventId) {
     deleteTaskFromCalendar(item.googleEventId);
+  }
+  if (type === 'goal') {
+    // Goal is gone for good now (no Undo) — unlink any tasks that pointed at it.
+    let unlinked = false;
+    tasks.forEach((t) => {
+      if (t.goalId === item.id) {
+        t.goalId = null;
+        unlinked = true;
+      }
+    });
+    if (unlinked) {
+      save(STORAGE_KEYS.tasks, tasks);
+      renderTasksAndGoals();
+    }
   }
 }
 
@@ -267,6 +291,18 @@ function renderHabits() {
   });
 }
 
+function toggleHabitToday(id) {
+  const habit = habits.find((h) => h.id === id);
+  if (!habit) return;
+  const today = todayKey();
+  const idx = habit.log.indexOf(today);
+  if (idx >= 0) habit.log.splice(idx, 1);
+  else habit.log.push(today);
+  save(STORAGE_KEYS.habits, habits);
+  renderHabits();
+  renderDashboard();
+}
+
 document.getElementById('habitForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = document.getElementById('habitInput');
@@ -285,14 +321,7 @@ document.getElementById('habitList').addEventListener('click', (e) => {
   const editBtn = e.target.closest('[data-edit]');
   const delBtn = e.target.closest('[data-delete]');
   if (checkBtn) {
-    const habit = habits.find((h) => h.id === checkBtn.dataset.id);
-    const today = todayKey();
-    const idx = habit.log.indexOf(today);
-    if (idx >= 0) habit.log.splice(idx, 1);
-    else habit.log.push(today);
-    save(STORAGE_KEYS.habits, habits);
-    renderHabits();
-    renderDashboard();
+    toggleHabitToday(checkBtn.dataset.id);
   } else if (editBtn) {
     startHabitEdit(editBtn.dataset.edit);
   } else if (delBtn) {
@@ -466,7 +495,44 @@ function startJournalEdit(id) {
 }
 
 // ---------- Goals ----------
+// A goal with linked (non-repeating) tasks gets its progress from them;
+// otherwise the manual +/- value is used. Repeating tasks never "finish", so
+// they're excluded from the percentage.
+function goalProgress(goal) {
+  const linked = tasks.filter((t) => t.goalId === goal.id);
+  const counted = linked.filter((t) => !t.recurrence);
+  const repeating = linked.length - counted.length;
+  if (counted.length === 0) return { pct: goal.progress, auto: false, total: 0, done: 0, repeating };
+  const done = counted.filter((t) => t.status === 'done').length;
+  return { pct: Math.round((done / counted.length) * 100), auto: true, total: counted.length, done, repeating };
+}
+
+function goalOptionsHTML(selectedId) {
+  return (
+    '<option value="">No goal</option>' +
+    goals
+      .map(
+        (g) =>
+          `<option value="${escapeHtml(g.id)}"${g.id === selectedId ? ' selected' : ''}>${escapeHtml(g.title)}</option>`
+      )
+      .join('')
+  );
+}
+
+function populateGoalSelect() {
+  const select = document.getElementById('taskGoal');
+  const current = select.value;
+  select.innerHTML = goalOptionsHTML(current);
+  select.disabled = goals.length === 0;
+}
+
+function renderTasksAndGoals() {
+  renderTasksView();
+  renderGoals();
+}
+
 function renderGoals() {
+  populateGoalSelect();
   const list = document.getElementById('goalList');
   list.innerHTML = '';
   if (goals.length === 0) {
@@ -478,15 +544,21 @@ function renderGoals() {
     li.className = 'item-card';
     li.dataset.id = goal.id;
     const dueText = goal.dueDate ? ` · due ${goal.dueDate}` : '';
+    const p = goalProgress(goal);
+    const taskText = p.auto ? ` · ${p.done}/${p.total} tasks done` : '';
+    const repeatText = p.repeating ? ` · ${p.repeating} repeating not counted` : '';
+    const controls = p.auto
+      ? '<span class="auto-badge" title="Progress is calculated from the tasks linked to this goal">auto</span>'
+      : `<button class="step-btn" data-dec="${escapeHtml(goal.id)}">-</button>
+        <button class="step-btn" data-inc="${escapeHtml(goal.id)}">+</button>`;
     li.innerHTML = `
       <div class="item-main">
-        <div class="item-title" data-title>${escapeHtml(goal.title)}${goal.progress >= 100 ? ' 🎉' : ''}</div>
-        <div class="item-meta" data-meta>${goal.progress}% complete${dueText}</div>
-        <div class="progress-track"><div class="progress-fill" style="width:${goal.progress}%"></div></div>
+        <div class="item-title" data-title>${escapeHtml(goal.title)}${p.pct >= 100 ? ' 🎉' : ''}</div>
+        <div class="item-meta" data-meta>${p.pct}% complete${escapeHtml(taskText)}${escapeHtml(repeatText)}${dueText}</div>
+        <div class="progress-track"><div class="progress-fill" style="width:${p.pct}%"></div></div>
       </div>
       <div class="goal-controls">
-        <button class="step-btn" data-dec="${escapeHtml(goal.id)}">-</button>
-        <button class="step-btn" data-inc="${escapeHtml(goal.id)}">+</button>
+        ${controls}
       </div>
       <button class="edit-btn" data-edit="${escapeHtml(goal.id)}" aria-label="Edit">✎</button>
       <button class="delete-btn" data-delete="${escapeHtml(goal.id)}" aria-label="Delete">✕</button>
@@ -516,12 +588,14 @@ document.getElementById('goalList').addEventListener('click', (e) => {
   const delBtn = e.target.closest('[data-delete]');
   if (incBtn) {
     const goal = goals.find((g) => g.id === incBtn.dataset.inc);
+    if (!goal) return;
     goal.progress = Math.min(100, goal.progress + 10);
     save(STORAGE_KEYS.goals, goals);
     renderGoals();
     renderDashboard();
   } else if (decBtn) {
     const goal = goals.find((g) => g.id === decBtn.dataset.dec);
+    if (!goal) return;
     goal.progress = Math.max(0, goal.progress - 10);
     save(STORAGE_KEYS.goals, goals);
     renderGoals();
@@ -529,7 +603,7 @@ document.getElementById('goalList').addEventListener('click', (e) => {
   } else if (editBtn) {
     startGoalEdit(editBtn.dataset.edit);
   } else if (delBtn) {
-    queueDelete('goal', goals, delBtn.dataset.delete, renderGoals);
+    queueDelete('goal', goals, delBtn.dataset.delete, renderTasksAndGoals);
   }
 });
 
@@ -818,7 +892,7 @@ async function syncFromGoogleCalendar() {
       if (ev.extendedProperties && ev.extendedProperties.private && ev.extendedProperties.private.appleTaskApp === 'true') return;
       const dueDate = eventDueDate(ev);
       if (!dueDate) return;
-      const task = { id: uid(), title: ev.summary || '(untitled event)', dueDate, status: 'todo', googleEventId: ev.id };
+      const task = makeTask({ title: ev.summary || '(untitled event)', dueDate, googleEventId: ev.id });
       tasks.push(task);
       linkedIds.add(ev.id);
       imported.push(task);
@@ -827,7 +901,7 @@ async function syncFromGoogleCalendar() {
 
     if (changed) {
       save(STORAGE_KEYS.tasks, tasks);
-      renderTasksView();
+      renderTasksAndGoals();
       renderDashboard();
     }
     save(STORAGE_KEYS.lastGoogleSyncAt, Date.now());
@@ -863,6 +937,81 @@ document.getElementById('googleClientIdSaveBtn').addEventListener('click', () =>
 const TASK_STATUSES = ['todo', 'in_progress', 'done'];
 const TASK_STATUS_LABELS = { todo: 'Open', in_progress: 'In Progress', done: 'Done' };
 
+const PRIORITIES = ['high', 'medium', 'low'];
+const PRIORITY_LABELS = { high: 'High', medium: 'Medium', low: 'Low' };
+const RECURRENCE_LABELS = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' };
+
+function makeTask(fields) {
+  return {
+    id: uid(),
+    title: '',
+    dueDate: null,
+    status: 'todo',
+    googleEventId: null,
+    priority: 'medium',
+    recurrence: null,
+    goalId: null,
+    ...fields,
+  };
+}
+
+function priorityRank(task) {
+  const i = PRIORITIES.indexOf(task.priority);
+  return i === -1 ? 1 : i;
+}
+
+// Next due date for a repeating task: step forward from its current due date
+// until it lands after today, so finishing a task late doesn't schedule the
+// next one in the past. Monthly keeps the original day (clamped to month end).
+function nextOccurrence(dueKey, recurrence) {
+  const today = todayKey();
+  let d = new Date(`${dueKey}T00:00:00`);
+  const anchorDay = d.getDate();
+  do {
+    if (recurrence === 'daily') {
+      d.setDate(d.getDate() + 1);
+    } else if (recurrence === 'weekly') {
+      d.setDate(d.getDate() + 7);
+    } else {
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const lastDay = new Date(y, m + 1, 0).getDate();
+      d = new Date(y, m, Math.min(anchorDay, lastDay));
+    }
+  } while (localDateKey(d) <= today);
+  return localDateKey(d);
+}
+
+function spawnNextOccurrence(task) {
+  if (!task.recurrence || !task.dueDate || task.nextTaskId) return;
+  const next = makeTask({
+    title: task.title,
+    dueDate: nextOccurrence(task.dueDate, task.recurrence),
+    priority: task.priority,
+    recurrence: task.recurrence,
+    goalId: task.goalId,
+  });
+  tasks.push(next);
+  task.nextTaskId = next.id;
+  pushTaskToCalendar(next);
+}
+
+// Un-completing a repeating task takes back the occurrence it created, as
+// long as that occurrence hasn't been touched yet.
+function retractNextOccurrence(task) {
+  if (!task.nextTaskId) return;
+  const idx = tasks.findIndex((t) => t.id === task.nextTaskId);
+  if (idx === -1) {
+    task.nextTaskId = null;
+    return;
+  }
+  const next = tasks[idx];
+  if (next.status !== 'todo') return;
+  tasks.splice(idx, 1);
+  if (next.googleEventId) deleteTaskFromCalendar(next.googleEventId);
+  task.nextTaskId = null;
+}
+
 function taskMeta(task, today) {
   const overdue = task.dueDate && task.dueDate < today && task.status !== 'done';
   const dueText = task.dueDate ? ` · due ${task.dueDate}` : '';
@@ -870,14 +1019,26 @@ function taskMeta(task, today) {
   return { overdue, dueText, label };
 }
 
-function taskCardHTML(task, today) {
-  const { overdue, dueText, label } = taskMeta(task, today);
+function taskMetaHTML(task, today) {
+  const { dueText, label } = taskMeta(task, today);
+  const priority = task.priority && PRIORITY_LABELS[task.priority] ? task.priority : 'medium';
+  const priorityBadge = `<span class="priority-badge ${priority}">${escapeHtml(PRIORITY_LABELS[priority])}</span>`;
+  const repeatBadge = task.recurrence && RECURRENCE_LABELS[task.recurrence]
+    ? `<span class="sync-badge">🔁 ${escapeHtml(RECURRENCE_LABELS[task.recurrence])}</span>`
+    : '';
+  const goal = task.goalId && goals.find((g) => g.id === task.goalId);
+  const goalBadge = goal ? `<span class="sync-badge">🎯 ${escapeHtml(goal.title)}</span>` : '';
   const syncBadge = task.googleEventId ? '<span class="sync-badge">📅 synced</span>' : '';
+  return `${escapeHtml(label)}${escapeHtml(dueText)} ${priorityBadge}${repeatBadge}${goalBadge}${syncBadge}`;
+}
+
+function taskCardHTML(task, today) {
+  const { overdue } = taskMeta(task, today);
   return `
     <button class="check-btn ${task.status === 'done' ? 'done' : ''}" data-id="${escapeHtml(task.id)}" aria-label="Mark done">${task.status === 'done' ? '✓' : ''}</button>
     <div class="item-main">
       <div class="item-title" data-title>${escapeHtml(task.title)}</div>
-      <div class="item-meta ${overdue ? 'overdue' : ''}" data-meta>${escapeHtml(label)}${escapeHtml(dueText)} ${syncBadge}</div>
+      <div class="item-meta ${overdue ? 'overdue' : ''}" data-meta>${taskMetaHTML(task, today)}</div>
     </div>
     <button class="edit-btn" data-edit="${escapeHtml(task.id)}" aria-label="Edit">✎</button>
     <button class="delete-btn" data-delete="${escapeHtml(task.id)}" aria-label="Delete">✕</button>
@@ -885,7 +1046,9 @@ function taskCardHTML(task, today) {
 }
 
 function sortedTasks() {
-  return [...tasks].sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
+  return [...tasks].sort(
+    (a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999') || priorityRank(a) - priorityRank(b)
+  );
 }
 
 function renderTasks() {
@@ -925,13 +1088,12 @@ function renderBoard() {
     const statusIdx = TASK_STATUSES.indexOf(status);
     const cards = byStatus[status]
       .map((task) => {
-        const { overdue, dueText, label } = taskMeta(task, today);
-        const syncBadge = task.googleEventId ? '<span class="sync-badge">📅 synced</span>' : '';
+        const { overdue } = taskMeta(task, today);
         return `
         <li class="item-card board-card" draggable="true" data-id="${escapeHtml(task.id)}">
           <div class="item-main">
             <div class="item-title" data-title>${escapeHtml(task.title)}</div>
-            <div class="item-meta ${overdue ? 'overdue' : ''}" data-meta>${escapeHtml(label)}${escapeHtml(dueText)} ${syncBadge}</div>
+            <div class="item-meta ${overdue ? 'overdue' : ''}" data-meta>${taskMetaHTML(task, today)}</div>
           </div>
           <div class="board-card-actions">
             <button class="board-move-btn" data-move="prev" data-id="${escapeHtml(task.id)}" aria-label="Move left" ${statusIdx === 0 ? 'disabled' : ''}>‹</button>
@@ -956,11 +1118,15 @@ function renderBoard() {
 function setTaskStatus(id, newStatus) {
   const task = tasks.find((t) => t.id === id);
   if (!task || task.status === newStatus) return;
+  const wasDone = task.status === 'done';
   task.status = newStatus;
+  if (newStatus === 'done' && !wasDone) spawnNextOccurrence(task);
+  else if (wasDone && newStatus !== 'done') retractNextOccurrence(task);
   save(STORAGE_KEYS.tasks, tasks);
   // Kanban status has no Google Calendar equivalent, so this deliberately
-  // never calls pushTaskToCalendar() — only title/date edits sync.
-  renderTasksView();
+  // never calls pushTaskToCalendar() on the task itself — only title/date
+  // edits sync (a spawned repeat occurrence is pushed as its own new task).
+  renderTasksAndGoals();
   renderDashboard();
 }
 
@@ -992,7 +1158,18 @@ document.getElementById('taskForm').addEventListener('submit', (e) => {
   const dateInput = document.getElementById('taskDate');
   const title = input.value.trim();
   if (!title) return;
-  const task = { id: uid(), title, dueDate: dateInput.value || null, status: 'todo', googleEventId: null };
+  const repeatSel = document.getElementById('taskRepeat');
+  const prioritySel = document.getElementById('taskPriority');
+  const goalSel = document.getElementById('taskGoal');
+  const recurrence = repeatSel.value || null;
+  const task = makeTask({
+    title,
+    // A repeating task needs an anchor date to repeat from.
+    dueDate: dateInput.value || (recurrence ? todayKey() : null),
+    priority: prioritySel.value,
+    recurrence,
+    goalId: goalSel.value || null,
+  });
   tasks.push(task);
   const ok = save(STORAGE_KEYS.tasks, tasks);
   if (!ok) {
@@ -1001,7 +1178,10 @@ document.getElementById('taskForm').addEventListener('submit', (e) => {
   }
   input.value = '';
   dateInput.value = '';
-  renderTasksView();
+  repeatSel.value = '';
+  prioritySel.value = 'medium';
+  goalSel.value = '';
+  renderTasksAndGoals();
   renderDashboard();
   pushTaskToCalendar(task);
 });
@@ -1016,7 +1196,7 @@ document.getElementById('taskList').addEventListener('click', (e) => {
   } else if (editBtn) {
     startTaskEdit(editBtn.dataset.edit);
   } else if (delBtn) {
-    queueDelete('task', tasks, delBtn.dataset.delete, renderTasksView);
+    queueDelete('task', tasks, delBtn.dataset.delete, renderTasksAndGoals);
   }
 });
 
@@ -1031,7 +1211,7 @@ document.getElementById('taskBoard').addEventListener('click', (e) => {
   } else if (editBtn) {
     startTaskEdit(editBtn.dataset.edit);
   } else if (delBtn) {
-    queueDelete('task', tasks, delBtn.dataset.delete, renderTasksView);
+    queueDelete('task', tasks, delBtn.dataset.delete, renderTasksAndGoals);
   }
 });
 
@@ -1084,8 +1264,26 @@ function startTaskEdit(id) {
   dateInput.type = 'date';
   dateInput.className = 'edit-input';
   dateInput.value = task.dueDate || '';
-  wrap.appendChild(titleInput);
-  wrap.appendChild(dateInput);
+  const prioritySelect = document.createElement('select');
+  prioritySelect.className = 'edit-input';
+  prioritySelect.setAttribute('aria-label', 'Priority');
+  prioritySelect.innerHTML = PRIORITIES.map(
+    (p) => `<option value="${p}"${p === (task.priority || 'medium') ? ' selected' : ''}>${PRIORITY_LABELS[p]} priority</option>`
+  ).join('');
+  const repeatSelect = document.createElement('select');
+  repeatSelect.className = 'edit-input';
+  repeatSelect.setAttribute('aria-label', 'Repeat');
+  repeatSelect.innerHTML =
+    `<option value="">Does not repeat</option>` +
+    Object.entries(RECURRENCE_LABELS)
+      .map(([k, label]) => `<option value="${k}"${k === task.recurrence ? ' selected' : ''}>Repeats ${label.toLowerCase()}</option>`)
+      .join('');
+  const goalSelect = document.createElement('select');
+  goalSelect.className = 'edit-input';
+  goalSelect.setAttribute('aria-label', 'Goal');
+  goalSelect.innerHTML = goalOptionsHTML(task.goalId);
+  const controls = [titleInput, dateInput, prioritySelect, repeatSelect, goalSelect];
+  controls.forEach((el) => wrap.appendChild(el));
 
   titleEl.replaceWith(wrap);
   metaEl.remove();
@@ -1096,17 +1294,21 @@ function startTaskEdit(id) {
     const val = titleInput.value.trim();
     if (val) {
       task.title = val;
-      task.dueDate = dateInput.value || null;
+      task.recurrence = repeatSelect.value || null;
+      // A repeating task needs an anchor date to repeat from.
+      task.dueDate = dateInput.value || (task.recurrence ? todayKey() : null);
+      task.priority = prioritySelect.value;
+      task.goalId = goalSelect.value || null;
       save(STORAGE_KEYS.tasks, tasks);
       pushTaskToCalendar(task);
       renderDashboard();
     }
-    renderTasksView();
+    renderTasksAndGoals();
   };
-  [titleInput, dateInput].forEach((el) => {
+  controls.forEach((el) => {
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') commit();
-      else if (e.key === 'Escape') renderTasksView();
+      else if (e.key === 'Escape') renderTasksAndGoals();
     });
     el.addEventListener('blur', () => {
       setTimeout(() => {
@@ -1242,13 +1444,13 @@ function confirmICSImport() {
   const newTasks = [];
   pendingICSImport.forEach((ev) => {
     if (ev.uid && existingUids.has(ev.uid)) return; // already imported previously
-    const task = { id: uid(), title: ev.title, dueDate: ev.dueDate, status: 'todo', googleEventId: null, icsUid: ev.uid || null };
+    const task = makeTask({ title: ev.title, dueDate: ev.dueDate, icsUid: ev.uid || null });
     tasks.push(task);
     newTasks.push(task);
   });
   const skipped = pendingICSImport.length - newTasks.length;
   save(STORAGE_KEYS.tasks, tasks);
-  renderTasksView();
+  renderTasksAndGoals();
   renderDashboard();
   newTasks.forEach((task) => {
     if (task.dueDate) pushTaskToCalendar(task);
@@ -1626,7 +1828,7 @@ function renderCalendarDayDetail(dateKey) {
   });
   const goalRows = entry.goals.map(
     (g) =>
-      `<li class="item-card"><div class="item-main"><div class="item-title">🎯 ${escapeHtml(g.title)}</div><div class="item-meta">${g.progress}% complete</div></div></li>`
+      `<li class="item-card"><div class="item-main"><div class="item-title">🎯 ${escapeHtml(g.title)}</div><div class="item-meta">${goalProgress(g).pct}% complete</div></div></li>`
   );
   list.innerHTML = taskRows.concat(goalRows).join('') || '<li class="empty-state">Nothing due.</li>';
   panel.hidden = false;
@@ -1656,14 +1858,145 @@ document.getElementById('calendarGrid').addEventListener('click', (e) => {
   renderCalendar();
 });
 
+// ---------- Today ----------
+function daysBetweenKeys(fromKey, toKey) {
+  const a = new Date(`${fromKey}T00:00:00`);
+  const b = new Date(`${toKey}T00:00:00`);
+  return Math.round((b - a) / 86400000);
+}
+
+function todayTaskRowHTML(task, today, { reschedule = false } = {}) {
+  const done = task.status === 'done';
+  const overdue = !done && task.dueDate && task.dueDate < today;
+  return `
+    <li class="item-card" data-id="${escapeHtml(task.id)}">
+      <button class="check-btn ${done ? 'done' : ''}" data-task="${escapeHtml(task.id)}" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '✓' : ''}</button>
+      <div class="item-main">
+        <div class="item-title">${escapeHtml(task.title)}</div>
+        <div class="item-meta ${overdue ? 'overdue' : ''}">${taskMetaHTML(task, today)}</div>
+      </div>
+      ${reschedule ? `<button type="button" class="secondary-btn today-move-btn" data-reschedule="${escapeHtml(task.id)}">Move to today</button>` : ''}
+    </li>`;
+}
+
+function renderToday() {
+  const root = document.getElementById('todayContent');
+  if (!root) return;
+  const today = todayKey();
+  const byUrgency = (a, b) =>
+    priorityRank(a) - priorityRank(b) || (a.dueDate || '').localeCompare(b.dueDate || '');
+
+  const overdue = tasks
+    .filter((t) => t.status !== 'done' && t.dueDate && t.dueDate < today)
+    .sort((a, b) => priorityRank(a) - priorityRank(b) || a.dueDate.localeCompare(b.dueDate));
+  const dueToday = tasks
+    .filter((t) => t.dueDate === today)
+    .sort((a, b) => (a.status === 'done') - (b.status === 'done') || byUrgency(a, b));
+
+  const habitStates = habits.map((h) => {
+    const done = h.log.includes(today);
+    const streak = habitStreak(h);
+    const lastLogged = h.log.length ? [...h.log].sort().pop() : null;
+    return {
+      habit: h,
+      done,
+      streak,
+      atRisk: !done && streak > 0,
+      lapsed: !done && streak === 0 && lastLogged !== null,
+      daysAgo: lastLogged ? daysBetweenKeys(lastLogged, today) : 0,
+    };
+  });
+
+  const doneCount = dueToday.filter((t) => t.status === 'done').length + habitStates.filter((h) => h.done).length;
+  const totalCount = dueToday.length + habitStates.length;
+  const pct = totalCount ? Math.round((doneCount / totalCount) * 100) : 0;
+
+  // Rule-based nudges: no AI, just what the data says is slipping.
+  const lapsed = habitStates.filter((h) => h.lapsed).sort((a, b) => a.daysAgo - b.daysAgo);
+  const atRisk = habitStates.filter((h) => h.atRisk).sort((a, b) => b.streak - a.streak);
+  const steps = [];
+  if (overdue.length) {
+    const more = overdue.length > 1 ? ` (${overdue.length - 1} more overdue)` : '';
+    steps.push(`Finish or reschedule “${overdue[0].title}”${more}.`);
+  }
+  if (lapsed.length) {
+    steps.push(`Do a tiny version of “${lapsed[0].habit.name}” today — it’s been ${lapsed[0].daysAgo} days.`);
+  }
+  if (atRisk.length) {
+    steps.push(`Keep your ${atRisk[0].streak}-day streak alive: “${atRisk[0].habit.name}”.`);
+  }
+  const slipping = overdue.length > 0 || lapsed.length > 0;
+  const nudgeHTML = steps.length
+    ? `<div class="today-nudge ${slipping ? 'slipping' : ''}">
+        <div class="today-nudge-title">${slipping ? 'Back on track' : 'Streaks to protect'}</div>
+        <ol class="today-steps">${steps.slice(0, 3).map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ol>
+      </div>`
+    : '';
+
+  const habitsHTML = habitStates.length
+    ? `<h2 class="section-heading">Habits</h2>
+       <ul class="item-list">${habitStates
+         .map(
+           ({ habit, done, streak }) => `
+         <li class="item-card">
+           <button class="check-btn ${done ? 'done' : ''}" data-habit="${escapeHtml(habit.id)}" aria-label="${done ? 'Mark not done today' : 'Mark done today'}">${done ? '✓' : ''}</button>
+           <div class="item-main">
+             <div class="item-title">${escapeHtml(habit.name)}</div>
+             <div class="item-meta">🔥 ${streak} day streak</div>
+           </div>
+         </li>`
+         )
+         .join('')}</ul>`
+    : '';
+
+  const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const empty = !overdue.length && !dueToday.length && !habitStates.length;
+
+  root.innerHTML = `
+    <div class="today-header">
+      <div>
+        <div class="today-date">${escapeHtml(dateLabel)}</div>
+        <div class="item-meta">${totalCount ? `${doneCount} of ${totalCount} done` : 'Nothing scheduled yet'}</div>
+      </div>
+      <div class="today-pct">${pct}%</div>
+    </div>
+    <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+    ${nudgeHTML}
+    ${overdue.length ? `<h2 class="section-heading overdue-heading">Overdue</h2><ul class="item-list">${overdue.map((t) => todayTaskRowHTML(t, today, { reschedule: true })).join('')}</ul>` : ''}
+    ${dueToday.length ? `<h2 class="section-heading">Due today</h2><ul class="item-list">${dueToday.map((t) => todayTaskRowHTML(t, today)).join('')}</ul>` : ''}
+    ${habitsHTML}
+    ${empty ? '<p class="empty-state">Nothing for today. Add a task due today or a habit to get started.</p>' : ''}
+  `;
+}
+
+document.getElementById('todayContent').addEventListener('click', (e) => {
+  const taskBtn = e.target.closest('[data-task]');
+  const habitBtn = e.target.closest('[data-habit]');
+  const moveBtn = e.target.closest('[data-reschedule]');
+  if (taskBtn) {
+    const task = tasks.find((t) => t.id === taskBtn.dataset.task);
+    if (task) setTaskStatus(task.id, task.status === 'done' ? 'todo' : 'done');
+  } else if (habitBtn) {
+    toggleHabitToday(habitBtn.dataset.habit);
+  } else if (moveBtn) {
+    const task = tasks.find((t) => t.id === moveBtn.dataset.reschedule);
+    if (!task) return;
+    task.dueDate = todayKey();
+    save(STORAGE_KEYS.tasks, tasks);
+    pushTaskToCalendar(task);
+    renderTasksAndGoals();
+    renderDashboard();
+  }
+});
+
 // ---------- Dashboard ----------
 function renderDashboard() {
   const grid = document.getElementById('dashboardGrid');
   const today = todayKey();
   const habitsDoneToday = habits.filter((h) => h.log.includes(today)).length;
   const bestStreak = habits.reduce((max, h) => Math.max(max, habitStreak(h)), 0);
-  const activeGoals = goals.filter((g) => g.progress < 100).length;
-  const completedGoals = goals.filter((g) => g.progress >= 100).length;
+  const activeGoals = goals.filter((g) => goalProgress(g).pct < 100).length;
+  const completedGoals = goals.filter((g) => goalProgress(g).pct >= 100).length;
   const latestMood = journal.length
     ? [...journal].sort((a, b) => b.createdAt - a.createdAt)[0].mood
     : '—';
@@ -1693,6 +2026,7 @@ function renderDashboard() {
 
   renderActivity();
   renderCalendar();
+  renderToday();
   renderWheel();
 
   const backupCard = document.getElementById('backupCard');
