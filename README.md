@@ -36,23 +36,27 @@ served by a small dependency-free Node.js server.
 
 Data is stored locally in the browser (`localStorage`) — no database.
 
-## Optional AI helpers
+## AI helpers (currently turned off)
 
-With a Gemini API key set on the server, three helpers appear: **Plan with AI**
-(Goals), and a **decision helper** and **journal summary** (Journal). Without a
-key none of them show, and nothing else changes.
+The code for three helpers is still here — **Plan with AI** (Goals), and a
+**decision helper** and **journal summary** (Journal) — but they are switched
+off, and none of their controls show. They call Gemini with one server-side
+key, which would bill every user's requests to the owner, so they stay off
+until usage is charged to each person's own account (see
+[issue #9](https://github.com/Damox101za/ApplesOnly/issues/9)).
+
+To try them locally you need both settings; a key alone does nothing:
 
 ```bash
-GEMINI_API_KEY=your-key npm start
+AI_ENABLED=true GEMINI_API_KEY=your-key npm start
 ```
 
 - `GEMINI_MODEL` (default `gemini-2.5-flash`) and `GEMINI_API_BASE` are optional.
 - The key stays on the server; the browser only talks to `/api/ai/*`.
-- The app has no login, so anyone who can reach your server can use the key.
-  Requests are size-limited and rate-limited (20 per 10 minutes per client,
-  300 per hour overall), but set a spending cap on the key as well.
-- The text you send (a goal, a decision, recent journal entries) is sent to
-  Google's Gemini API to generate the answer.
+- Requests are size-limited and rate-limited (20 per 10 minutes per client,
+  300 per hour overall).
+- The text you send (a goal, a decision, recent journal entries) goes to
+  Google's Gemini API.
 
 ## Running locally
 

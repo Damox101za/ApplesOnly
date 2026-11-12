@@ -1,6 +1,10 @@
 'use strict';
-// Optional AI helpers. Disabled unless GEMINI_API_KEY is set in the server's
-// environment; the key never reaches the browser.
+// Optional AI helpers. Currently TURNED OFF: they only run when the server has
+// both AI_ENABLED=true and a GEMINI_API_KEY. Until usage is billed to each
+// user's own account (see the open issue), leave AI_ENABLED unset so nobody
+// else's requests can spend the owner's key. The key never reaches the browser.
+
+const { sendJson, sameOrigin, readJsonBody, closeAfterResponse } = require('./httpkit');
 
 const API_BASE = process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com/v1beta';
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -8,8 +12,8 @@ const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const MAX_BODY_BYTES = 24 * 1024;
 const UPSTREAM_TIMEOUT_MS = 30000;
 
-// The app has no login, so anyone who can reach the server can reach this
-// endpoint. Keep the blast radius small: per-IP and global caps.
+// Whoever can reach this endpoint spends the key, so keep the blast radius
+// small: per-IP and global caps.
 const IP_LIMIT = 20;
 const IP_WINDOW_MS = 10 * 60 * 1000;
 const GLOBAL_LIMIT = 300;
@@ -18,12 +22,11 @@ const hitsByIp = new Map();
 let globalHits = [];
 
 function isEnabled() {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return process.env.AI_ENABLED === 'true' && Boolean(process.env.GEMINI_API_KEY);
 }
 
-function sendJson(res, status, body) {
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-  res.end(JSON.stringify(body));
+if (process.env.GEMINI_API_KEY && process.env.AI_ENABLED !== 'true') {
+  console.log('AI helpers are turned off. Set AI_ENABLED=true to turn them on.');
 }
 
 function clientIp(req) {
@@ -44,50 +47,6 @@ function underLimit(req) {
   hitsByIp.set(ip, recent);
   globalHits.push(now);
   return true;
-}
-
-function sameOrigin(req) {
-  const origin = req.headers.origin;
-  if (!origin) return true; // same-origin fetches from some browsers omit it
-  try {
-    return new URL(origin).host === req.headers.host;
-  } catch {
-    return false;
-  }
-}
-
-function readJsonBody(req) {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    let done = false;
-    const chunks = [];
-    req.on('data', (chunk) => {
-      if (done) return;
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        done = true;
-        req.pause(); // stop reading; the handler answers 413 and then drops the socket
-        reject(Object.assign(new Error('Request too large.'), { status: 413 }));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      if (done) return;
-      done = true;
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
-      } catch {
-        reject(Object.assign(new Error('Invalid JSON.'), { status: 400 }));
-      }
-    });
-    req.on('error', (err) => {
-      if (!done) {
-        done = true;
-        reject(err);
-      }
-    });
-  });
 }
 
 // ---- input / output shaping ----
@@ -205,7 +164,7 @@ async function handle(req, res, pathname) {
     res.setHeader('Allow', 'POST');
     return sendJson(res, 405, { error: 'Use POST.' });
   }
-  if (!isEnabled()) return sendJson(res, 503, { error: 'AI is not configured on this server.' });
+  if (!isEnabled()) return sendJson(res, 503, { error: 'The AI helpers are turned off.' });
   if (!sameOrigin(req)) return sendJson(res, 403, { error: 'Cross-origin requests are not allowed.' });
   if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) {
     return sendJson(res, 415, { error: 'Send JSON.' });
@@ -214,14 +173,11 @@ async function handle(req, res, pathname) {
 
   const job = JOBS[kind];
   try {
-    const input = job.parse(await readJsonBody(req));
+    const input = job.parse(await readJsonBody(req, MAX_BODY_BYTES));
     const output = job.shape(await callGemini(job.prompt(input)));
     return sendJson(res, 200, output);
   } catch (err) {
-    if (err.status === 413) {
-      res.setHeader('Connection', 'close');
-      res.on('finish', () => req.destroy());
-    }
+    if (err.status === 413) closeAfterResponse(req, res);
     if (err.status) return sendJson(res, err.status, { error: err.message });
     console.error(`AI ${kind} failed:`, err.message);
     return sendJson(res, 502, { error: 'The AI service had a problem. Please try again.' });
