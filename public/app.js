@@ -11,11 +11,14 @@ const STORAGE_KEYS = {
   lastGoogleSyncAt: 'lifeTracker.lastGoogleSyncAt',
   taskViewMode: 'lifeTracker.taskViewMode',
   wheelRatings: 'lifeTracker.wheelRatings',
+  projects: 'lifeTracker.projects',
+  money: 'lifeTracker.money',
+  theme: 'lifeTracker.theme',
 };
 
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 // ---------- Storage helpers ----------
 function safeParse(raw, fallback) {
@@ -114,6 +117,27 @@ const MIGRATIONS = {
     });
     return data;
   },
+  4(data) {
+    // Projects group goals and tasks; habits get a schedule; journal gets tags.
+    data.projects = data.projects || [];
+    data.goals = (data.goals || []).map((g) => {
+      if (g.projectId === undefined) g.projectId = null;
+      return g;
+    });
+    data.tasks = (data.tasks || []).map((t) => {
+      if (t.projectId === undefined) t.projectId = null;
+      return t;
+    });
+    data.habits = (data.habits || []).map((h) => {
+      if (!h.frequency) h.frequency = { type: 'daily', days: [] };
+      return h;
+    });
+    data.journal = (data.journal || []).map((j) => {
+      if (!Array.isArray(j.tags)) j.tags = [];
+      return j;
+    });
+    return data;
+  },
 };
 
 function migrate(data) {
@@ -133,6 +157,7 @@ function loadAndMigrate() {
     journal: load(STORAGE_KEYS.journal, []),
     goals: load(STORAGE_KEYS.goals, []),
     tasks: load(STORAGE_KEYS.tasks, []),
+    projects: load(STORAGE_KEYS.projects, []),
     schemaVersion: storedVersion,
   };
 
@@ -142,23 +167,87 @@ function loadAndMigrate() {
     save(STORAGE_KEYS.journal, data.journal);
     save(STORAGE_KEYS.goals, data.goals);
     save(STORAGE_KEYS.tasks, data.tasks);
+    save(STORAGE_KEYS.projects, data.projects);
     save(STORAGE_KEYS.schemaVersion, data.schemaVersion);
   }
 
   return data;
 }
 
-let { habits, journal, goals, tasks } = loadAndMigrate();
+let { habits, journal, goals, tasks, projects } = loadAndMigrate();
+let money = load(STORAGE_KEYS.money, {});
+
+// ---------- Icons ----------
+// Small stroke icons (24px grid), inlined so there are no extra requests.
+const ICON_PATHS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  'layout-dashboard': '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
+  'list-checks': '<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>',
+  calendar: '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>',
+  'calendar-check': '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/>',
+  flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  'book-open': '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
+  target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  hexagon: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>',
+  wallet: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
+  'check-circle': '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
+  smile: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
+  'alert-triangle': '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  'trending-up': '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M17 5h4"/>',
+  'chart-pie': '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>',
+};
+
+function icon(name, cls = '') {
+  return `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
+}
 
 // ---------- Tabs ----------
-document.getElementById('tabs').addEventListener('click', (e) => {
-  const btn = e.target.closest('.tab-btn');
+const NAV = [
+  { group: 'Daily', items: [['today', 'Today', 'sun'], ['tasks', 'Tasks', 'list-checks'], ['calendar', 'Calendar', 'calendar'], ['habits', 'Habits', 'flame'], ['journal', 'Journal', 'book-open']] },
+  { group: 'Plan', items: [['goals', 'Goals', 'target'], ['projects', 'Projects', 'folder']] },
+  { group: 'Insights', items: [['dashboard', 'Dashboard', 'layout-dashboard'], ['wheel', 'Life Wheel', 'hexagon'], ['money', 'Money', 'wallet']] },
+];
+
+function showTab(tab) {
+  const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
   if (!btn) return;
-  document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach((b) => {
+    b.classList.remove('active');
+    b.removeAttribute('aria-current');
+  });
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById(btn.dataset.tab).classList.add('active');
+  btn.setAttribute('aria-current', 'page');
+  document.getElementById(tab).classList.add('active');
+  document.getElementById('pageTitle').textContent = btn.dataset.label;
+  document.getElementById('pageIcon').innerHTML = icon(btn.dataset.icon);
+  const main = document.getElementById('main');
+  if (main) main.scrollTo(0, 0);
+}
+
+document.getElementById('tabs').innerHTML = NAV.map(
+  (g) => `
+  <div class="nav-group">
+    <div class="nav-group-label">${g.group}</div>
+    ${g.items
+      .map(
+        ([tab, label, ic]) =>
+          `<button type="button" class="tab-btn" data-tab="${tab}" data-label="${label}" data-icon="${ic}">${icon(ic)}<span>${label}</span></button>`
+      )
+      .join('')}
+  </div>`
+).join('');
+
+document.getElementById('tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab-btn');
+  if (btn) showTab(btn.dataset.tab);
 });
+showTab('today');
 
 // ---------- Undo-delete ----------
 // Deleting an item hides it immediately but defers the actual save+removal
@@ -170,6 +259,7 @@ function listFor(type) {
   if (type === 'habit') return habits;
   if (type === 'journal') return journal;
   if (type === 'goal') return goals;
+  if (type === 'project') return projects;
   return tasks;
 }
 
@@ -177,6 +267,7 @@ function saveList(type) {
   if (type === 'habit') save(STORAGE_KEYS.habits, habits);
   else if (type === 'journal') save(STORAGE_KEYS.journal, journal);
   else if (type === 'goal') save(STORAGE_KEYS.goals, goals);
+  else if (type === 'project') save(STORAGE_KEYS.projects, projects);
   else save(STORAGE_KEYS.tasks, tasks);
 }
 
@@ -203,6 +294,17 @@ function finalizePendingDelete() {
       save(STORAGE_KEYS.tasks, tasks);
       renderTasksAndGoals();
     }
+  }
+  if (type === 'project') {
+    goals.forEach((g) => {
+      if (g.projectId === item.id) g.projectId = null;
+    });
+    tasks.forEach((t) => {
+      if (t.projectId === item.id) t.projectId = null;
+    });
+    save(STORAGE_KEYS.goals, goals);
+    save(STORAGE_KEYS.tasks, tasks);
+    renderTasksAndGoals();
   }
 }
 
@@ -248,19 +350,153 @@ function hideToast() {
 window.addEventListener('beforeunload', finalizePendingDelete);
 
 // ---------- Habits ----------
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// A habit's schedule: every day, specific weekdays, or once a week (any day).
+function habitFrequency(habit) {
+  const f = habit.frequency;
+  if (f && f.type === 'weekly') return { type: 'weekly', days: [] };
+  if (f && f.type === 'days' && Array.isArray(f.days) && f.days.length) {
+    return { type: 'days', days: [...new Set(f.days)].sort((a, b) => a - b) };
+  }
+  return { type: 'daily', days: [] };
+}
+
+function describeFrequency(f) {
+  if (f.type === 'weekly') return 'Once a week';
+  if (f.type === 'daily') return 'Every day';
+  const key = f.days.join(',');
+  if (key === '1,2,3,4,5') return 'Weekdays';
+  if (key === '0,6') return 'Weekends';
+  return f.days.map((d) => WEEKDAY_SHORT[d]).join(', ');
+}
+
+function weekStartKey(date) {
+  const d = new Date(date);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // Monday-based weeks
+  return localDateKey(d);
+}
+
+// Is this habit part of today's to-do? Done-today always counts; a weekly
+// habit stays due until it's done once this week.
+function habitDueToday(habit) {
+  const now = new Date();
+  if (habit.log.includes(localDateKey(now))) return true;
+  const f = habitFrequency(habit);
+  if (f.type === 'daily') return true;
+  if (f.type === 'days') return f.days.includes(now.getDay());
+  const wk = weekStartKey(now);
+  return !habit.log.some((k) => weekStartKey(new Date(`${k}T00:00:00`)) === wk);
+}
+
+function habitStreakUnit(habit) {
+  return habitFrequency(habit).type === 'weekly' ? 'week' : 'day';
+}
+
+// Daily habits count consecutive days; "specific days" habits count
+// consecutive scheduled days (off days never break a streak); weekly habits
+// count consecutive weeks with at least one check-in.
 function habitStreak(habit) {
-  let streak = 0;
+  const f = habitFrequency(habit);
+  const log = new Set(habit.log);
   const cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+
+  if (f.type === 'weekly') {
+    const weeks = new Set(habit.log.map((k) => weekStartKey(new Date(`${k}T00:00:00`))));
+    if (!weeks.has(weekStartKey(cursor))) cursor.setDate(cursor.getDate() - 7);
+    let streak = 0;
+    while (weeks.has(weekStartKey(cursor))) {
+      streak++;
+      cursor.setDate(cursor.getDate() - 7);
+    }
+    return streak;
+  }
+
   // If today isn't logged yet, start counting from yesterday so the streak
   // doesn't drop to 0 every morning before you've had a chance to check in.
-  if (!habit.log.includes(localDateKey(cursor))) {
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  while (habit.log.includes(localDateKey(cursor))) {
-    streak++;
+  if (!log.has(localDateKey(cursor))) cursor.setDate(cursor.getDate() - 1);
+  let streak = 0;
+  for (let i = 0; i < 3660; i++) {
+    if (log.has(localDateKey(cursor))) streak++;
+    else if (f.type === 'daily' || f.days.includes(cursor.getDay())) break;
     cursor.setDate(cursor.getDate() - 1);
   }
   return streak;
+}
+
+// Select + weekday chips. Used by the add form and the inline editor.
+const FREQ_PRESETS = {
+  daily: 'Every day',
+  weekdays: 'Weekdays',
+  weekends: 'Weekends',
+  weekly: 'Once a week',
+  custom: 'Specific days…',
+};
+
+function frequencyPresetOf(f) {
+  if (f.type === 'daily') return 'daily';
+  if (f.type === 'weekly') return 'weekly';
+  const key = f.days.join(',');
+  if (key === '1,2,3,4,5') return 'weekdays';
+  if (key === '0,6') return 'weekends';
+  return 'custom';
+}
+
+function createFrequencyControl(initial) {
+  const wrap = document.createElement('div');
+  wrap.className = 'freq-control';
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', 'Schedule');
+  select.innerHTML = Object.entries(FREQ_PRESETS)
+    .map(([k, label]) => `<option value="${k}">${label}</option>`)
+    .join('');
+  const chips = document.createElement('div');
+  chips.className = 'freq-days';
+  chips.innerHTML = [1, 2, 3, 4, 5, 6, 0]
+    .map(
+      (d) =>
+        `<label class="freq-day"><input type="checkbox" value="${d}"><span>${WEEKDAY_SHORT[d]}</span></label>`
+    )
+    .join('');
+  wrap.append(select, chips);
+
+  const boxes = () => [...chips.querySelectorAll('input')];
+  const sync = () => {
+    chips.hidden = select.value !== 'custom';
+  };
+  const set = (f) => {
+    const freq = f || { type: 'daily', days: [] };
+    select.value = frequencyPresetOf(freq);
+    boxes().forEach((b) => {
+      b.checked = freq.type === 'days' && freq.days.includes(Number(b.value));
+    });
+    sync();
+  };
+  const get = () => {
+    const days = boxes().filter((b) => b.checked).map((b) => Number(b.value)).sort((a, b) => a - b);
+    switch (select.value) {
+      case 'weekly':
+        return { type: 'weekly', days: [] };
+      case 'weekdays':
+        return { type: 'days', days: [1, 2, 3, 4, 5] };
+      case 'weekends':
+        return { type: 'days', days: [0, 6] };
+      case 'custom':
+        return days.length ? { type: 'days', days } : { type: 'daily', days: [] };
+      default:
+        return { type: 'daily', days: [] };
+    }
+  };
+  select.addEventListener('change', sync);
+  set(initial);
+  return { el: wrap, get, set };
+}
+
+function habitStreakText(habit) {
+  const n = habitStreak(habit);
+  const unit = habitStreakUnit(habit);
+  return `${n}-${unit} streak`;
 }
 
 function renderHabits() {
@@ -280,7 +516,7 @@ function renderHabits() {
       <button class="check-btn ${done ? 'done' : ''}" data-id="${escapeHtml(habit.id)}" aria-label="Mark done today">${done ? '✓' : ''}</button>
       <div class="item-main">
         <div class="item-title" data-title>${escapeHtml(habit.name)}</div>
-        <div class="item-meta">🔥 ${habitStreak(habit)} day streak
+        <div class="item-meta">🔥 ${escapeHtml(habitStreakText(habit))} · ${escapeHtml(describeFrequency(habitFrequency(habit)))}${habitDueToday(habit) ? '' : ' · not today'}
           <select class="area-select small" data-area="${escapeHtml(habit.id)}" aria-label="Life area">${areaOptionsHTML(habit.area)}</select>
         </div>
       </div>
@@ -303,15 +539,19 @@ function toggleHabitToday(id) {
   renderDashboard();
 }
 
+const habitFreqControl = createFrequencyControl(null);
+document.getElementById('habitFreqMount').appendChild(habitFreqControl.el);
+
 document.getElementById('habitForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = document.getElementById('habitInput');
   const name = input.value.trim();
   if (!name) return;
   const area = document.getElementById('habitArea').value || null;
-  habits.push({ id: uid(), name, log: [], area, createdAt: Date.now() });
+  habits.push({ id: uid(), name, log: [], area, createdAt: Date.now(), frequency: habitFreqControl.get() });
   save(STORAGE_KEYS.habits, habits);
   input.value = '';
+  habitFreqControl.set(null);
   renderHabits();
   renderDashboard();
 });
@@ -343,11 +583,18 @@ function startHabitEdit(id) {
   const habit = habits.find((h) => h.id === id);
   const li = document.querySelector(`#habitList [data-id="${CSS.escape(id)}"]`);
   const titleEl = li.querySelector('[data-title]');
+  const metaEl = li.querySelector('.item-meta');
+  const wrap = document.createElement('div');
+  wrap.className = 'edit-goal';
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'edit-input';
   input.value = habit.name;
-  titleEl.replaceWith(input);
+  const freq = createFrequencyControl(habitFrequency(habit));
+  freq.el.classList.add('edit');
+  wrap.append(input, freq.el);
+  titleEl.replaceWith(wrap);
+  if (metaEl) metaEl.remove();
   input.focus();
   input.select();
 
@@ -355,15 +602,21 @@ function startHabitEdit(id) {
     const val = input.value.trim();
     if (val) {
       habit.name = val;
+      habit.frequency = freq.get();
       save(STORAGE_KEYS.habits, habits);
     }
     renderHabits();
+    renderDashboard();
   };
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') commit();
     else if (e.key === 'Escape') renderHabits();
   });
-  input.addEventListener('blur', commit);
+  wrap.addEventListener('focusout', () => {
+    setTimeout(() => {
+      if (!wrap.contains(document.activeElement)) commit();
+    }, 0);
+  });
 }
 
 // ---------- Journal ----------
@@ -381,14 +634,52 @@ document.getElementById('moodPicker').addEventListener('click', (e) => {
   selectedMood = btn.dataset.mood;
 });
 
+// Tags: comma- or space-separated, lowercased, '#' optional, de-duplicated.
+function parseTags(str) {
+  const tags = String(str || '')
+    .split(/[,\s]+/)
+    .map((t) => t.replace(/^#+/, '').trim().toLowerCase().slice(0, 24))
+    .filter(Boolean);
+  return [...new Set(tags)].slice(0, 8);
+}
+
+let journalTagFilter = null;
+
+function renderJournalFilter() {
+  const bar = document.getElementById('journalFilter');
+  const counts = {};
+  journal.forEach((j) => (j.tags || []).forEach((t) => (counts[t] = (counts[t] || 0) + 1)));
+  const tags = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+  if (journalTagFilter && !counts[journalTagFilter]) journalTagFilter = null;
+  bar.hidden = tags.length === 0;
+  bar.innerHTML = tags.length
+    ? `<button type="button" class="tag-chip ${journalTagFilter ? '' : 'active'}" data-filter="">All</button>` +
+      tags
+        .map(
+          (t) =>
+            `<button type="button" class="tag-chip ${journalTagFilter === t ? 'active' : ''}" data-filter="${escapeHtml(t)}">#${escapeHtml(t)} <span class="tag-count">${counts[t]}</span></button>`
+        )
+        .join('')
+    : '';
+}
+
+document.getElementById('journalFilter').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-filter]');
+  if (!btn) return;
+  journalTagFilter = btn.dataset.filter || null;
+  renderJournal();
+});
+
 function renderJournal() {
   const list = document.getElementById('journalList');
   list.innerHTML = '';
+  renderJournalFilter();
   if (journal.length === 0) {
     list.innerHTML = '<li class="empty-state">No journal entries yet.</li>';
     return;
   }
-  [...journal]
+  const visible = journalTagFilter ? journal.filter((j) => (j.tags || []).includes(journalTagFilter)) : journal;
+  [...visible]
     .sort((a, b) => b.createdAt - a.createdAt)
     .forEach((entry) => {
       const li = document.createElement('li');
@@ -399,6 +690,13 @@ function renderJournal() {
         <div class="item-main">
           <div class="item-title" data-title>${escapeHtml(entry.mood)} ${new Date(entry.createdAt).toLocaleDateString()}${editedTag}</div>
           <div class="item-text" data-text>${escapeHtml(entry.text)}</div>
+          ${
+            (entry.tags || []).length
+              ? `<div class="tag-row" data-tags>${entry.tags
+                  .map((t) => `<button type="button" class="tag-chip small" data-filter="${escapeHtml(t)}">#${escapeHtml(t)}</button>`)
+                  .join('')}</div>`
+              : ''
+          }
         </div>
         <button class="edit-btn" data-edit="${escapeHtml(entry.id)}" aria-label="Edit">✎</button>
         <button class="delete-btn" data-delete="${escapeHtml(entry.id)}" aria-label="Delete">✕</button>
@@ -412,7 +710,8 @@ document.getElementById('journalForm').addEventListener('submit', (e) => {
   const input = document.getElementById('journalInput');
   const text = input.value.trim();
   if (!text) return;
-  journal.push({ id: uid(), text, mood: selectedMood, createdAt: Date.now() });
+  const tagsInput = document.getElementById('journalTags');
+  journal.push({ id: uid(), text, mood: selectedMood, createdAt: Date.now(), tags: parseTags(tagsInput.value) });
   const ok = save(STORAGE_KEYS.journal, journal);
   if (!ok) {
     // Roll back the in-memory push so state matches what's actually saved,
@@ -421,11 +720,18 @@ document.getElementById('journalForm').addEventListener('submit', (e) => {
     return;
   }
   input.value = '';
+  tagsInput.value = '';
   renderJournal();
   renderDashboard();
 });
 
 document.getElementById('journalList').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-filter]');
+  if (chip) {
+    journalTagFilter = journalTagFilter === chip.dataset.filter ? null : chip.dataset.filter;
+    renderJournal();
+    return;
+  }
   const editBtn = e.target.closest('[data-edit]');
   const delBtn = e.target.closest('[data-delete]');
   if (editBtn) {
@@ -467,8 +773,18 @@ function startJournalEdit(id) {
   textarea.rows = 3;
   textarea.value = entry.text;
 
+  const tagsEdit = document.createElement('input');
+  tagsEdit.type = 'text';
+  tagsEdit.className = 'edit-input';
+  tagsEdit.placeholder = 'Tags (comma separated)';
+  tagsEdit.setAttribute('aria-label', 'Tags');
+  tagsEdit.value = (entry.tags || []).map((t) => `#${t}`).join(', ');
+
   wrap.appendChild(moodRow);
   wrap.appendChild(textarea);
+  wrap.appendChild(tagsEdit);
+  const oldTags = li.querySelector('[data-tags]');
+  if (oldTags) oldTags.remove();
   textEl.replaceWith(wrap);
   textarea.focus();
 
@@ -477,17 +793,21 @@ function startJournalEdit(id) {
     if (val) {
       entry.text = val;
       entry.mood = editMood;
+      entry.tags = parseTags(tagsEdit.value);
       entry.editedAt = Date.now();
       save(STORAGE_KEYS.journal, journal);
     }
     renderJournal();
   };
-  textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') renderJournal();
-    else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) commit();
+  [textarea, tagsEdit].forEach((el) => {
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') renderJournal();
+      else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) commit();
+      else if (e.key === 'Enter' && el === tagsEdit) commit();
+    });
   });
-  textarea.addEventListener('blur', () => {
-    // Allow a click on the mood row without losing the edit.
+  wrap.addEventListener('focusout', () => {
+    // Allow a click on the mood row or tags field without losing the edit.
     setTimeout(() => {
       if (!wrap.contains(document.activeElement)) commit();
     }, 0);
@@ -529,6 +849,7 @@ function populateGoalSelect() {
 function renderTasksAndGoals() {
   renderTasksView();
   renderGoals();
+  renderProjects();
 }
 
 function renderGoals() {
@@ -573,11 +894,13 @@ document.getElementById('goalForm').addEventListener('submit', (e) => {
   const dateInput = document.getElementById('goalDate');
   const title = input.value.trim();
   if (!title) return;
-  goals.push({ id: uid(), title, dueDate: dateInput.value || null, progress: 0 });
+  const projectSel = document.getElementById('goalProject');
+  goals.push({ id: uid(), title, dueDate: dateInput.value || null, progress: 0, projectId: projectSel.value || null });
   save(STORAGE_KEYS.goals, goals);
   input.value = '';
   dateInput.value = '';
-  renderGoals();
+  projectSel.value = '';
+  renderTasksAndGoals();
   renderDashboard();
 });
 
@@ -623,8 +946,13 @@ function startGoalEdit(id) {
   dateInput.type = 'date';
   dateInput.className = 'edit-input';
   dateInput.value = goal.dueDate || '';
+  const projectSelect = document.createElement('select');
+  projectSelect.className = 'edit-input';
+  projectSelect.setAttribute('aria-label', 'Project');
+  projectSelect.innerHTML = projectOptionsHTML(goal.projectId);
   wrap.appendChild(titleInput);
   wrap.appendChild(dateInput);
+  wrap.appendChild(projectSelect);
 
   titleEl.replaceWith(wrap);
   metaEl.remove();
@@ -636,15 +964,16 @@ function startGoalEdit(id) {
     if (val) {
       goal.title = val;
       goal.dueDate = dateInput.value || null;
+      goal.projectId = projectSelect.value || null;
       save(STORAGE_KEYS.goals, goals);
       renderDashboard();
     }
-    renderGoals();
+    renderTasksAndGoals();
   };
-  [titleInput, dateInput].forEach((el) => {
+  [titleInput, dateInput, projectSelect].forEach((el) => {
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') commit();
-      else if (e.key === 'Escape') renderGoals();
+      else if (e.key === 'Escape') renderTasksAndGoals();
     });
     el.addEventListener('blur', () => {
       setTimeout(() => {
@@ -652,6 +981,157 @@ function startGoalEdit(id) {
       }, 0);
     });
   });
+}
+
+// ---------- Projects ----------
+// A project groups goals and tasks. A task belongs to a project directly, or
+// through its goal.
+function projectOptionsHTML(selectedId) {
+  return (
+    '<option value="">No project</option>' +
+    projects
+      .map(
+        (p) =>
+          `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? ' selected' : ''}>${escapeHtml(p.name)}</option>`
+      )
+      .join('')
+  );
+}
+
+function populateProjectSelects() {
+  ['taskProject', 'goalProject'].forEach((id) => {
+    const select = document.getElementById(id);
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = projectOptionsHTML(current);
+    select.disabled = projects.length === 0;
+  });
+}
+
+function taskProjectId(task) {
+  if (task.projectId) return task.projectId;
+  const goal = task.goalId && goals.find((g) => g.id === task.goalId);
+  return goal ? goal.projectId || null : null;
+}
+
+function projectStats(project) {
+  const pGoals = goals.filter((g) => g.projectId === project.id);
+  const pTasks = tasks.filter((t) => taskProjectId(t) === project.id);
+  const counted = pTasks.filter((t) => !t.recurrence);
+  const done = counted.filter((t) => t.status === 'done').length;
+  let pct = 0;
+  if (counted.length) pct = Math.round((done / counted.length) * 100);
+  else if (pGoals.length) pct = Math.round(pGoals.reduce((sum, g) => sum + goalProgress(g).pct, 0) / pGoals.length);
+  return { goals: pGoals, tasks: pTasks, counted: counted.length, done, pct };
+}
+
+const openProjects = new Set();
+
+function renderProjects() {
+  populateProjectSelects();
+  const list = document.getElementById('projectList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (projects.length === 0) {
+    list.innerHTML = '<li class="empty-state">No projects yet. A project groups related goals and tasks.</li>';
+    return;
+  }
+  projects.forEach((project) => {
+    const st = projectStats(project);
+    const goalRows = st.goals
+      .map((g) => `<li>🎯 ${escapeHtml(g.title)} <span class="item-meta">${goalProgress(g).pct}%</span></li>`)
+      .join('');
+    const taskRows = [...st.tasks]
+      .sort((a, b) => (a.status === 'done') - (b.status === 'done') || priorityRank(a) - priorityRank(b))
+      .map(
+        (t) =>
+          `<li class="${t.status === 'done' ? 'is-done' : ''}">${t.status === 'done' ? '✓' : '○'} ${escapeHtml(t.title)}${t.dueDate ? ` <span class="item-meta">${escapeHtml(t.dueDate)}</span>` : ''}</li>`
+      )
+      .join('');
+    const summary = [
+      `${st.goals.length} goal${st.goals.length === 1 ? '' : 's'}`,
+      `${st.tasks.length} task${st.tasks.length === 1 ? '' : 's'}`,
+      `${st.pct}% done`,
+    ].join(' · ');
+    const li = document.createElement('li');
+    li.className = 'item-card project-card';
+    li.dataset.id = project.id;
+    li.innerHTML = `
+      <div class="project-body">
+        <div class="project-head">
+          <div class="item-main">
+            <div class="item-title" data-title>${icon('folder', 'inline')}${escapeHtml(project.name)}${st.pct >= 100 && st.counted ? ' 🎉' : ''}</div>
+            <div class="item-meta" data-meta>${escapeHtml(summary)}</div>
+          </div>
+          <button class="edit-btn" data-edit="${escapeHtml(project.id)}" aria-label="Rename">✎</button>
+          <button class="delete-btn" data-delete="${escapeHtml(project.id)}" aria-label="Delete">✕</button>
+        </div>
+        <div class="progress-track"><div class="progress-fill" style="width:${st.pct}%"></div></div>
+        <details class="project-details" data-project="${escapeHtml(project.id)}" ${openProjects.has(project.id) ? 'open' : ''}>
+          <summary>Goals &amp; tasks</summary>
+          ${goalRows || taskRows ? `<ul class="project-items">${goalRows}${taskRows}</ul>` : '<p class="item-meta">Nothing linked yet. Pick this project when adding a goal or task.</p>'}
+        </details>
+      </div>`;
+    list.appendChild(li);
+  });
+}
+
+document.getElementById('projectForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = document.getElementById('projectInput');
+  const name = input.value.trim();
+  if (!name) return;
+  projects.push({ id: uid(), name, createdAt: Date.now() });
+  if (!save(STORAGE_KEYS.projects, projects)) {
+    projects.pop();
+    return;
+  }
+  input.value = '';
+  renderProjects();
+});
+
+document.getElementById('projectList').addEventListener('toggle', (e) => {
+  const d = e.target.closest('[data-project]');
+  if (!d) return;
+  if (d.open) openProjects.add(d.dataset.project);
+  else openProjects.delete(d.dataset.project);
+}, true);
+
+document.getElementById('projectList').addEventListener('click', (e) => {
+  const editBtn = e.target.closest('[data-edit]');
+  const delBtn = e.target.closest('[data-delete]');
+  if (editBtn) {
+    startProjectEdit(editBtn.dataset.edit);
+  } else if (delBtn) {
+    queueDelete('project', projects, delBtn.dataset.delete, renderTasksAndGoals);
+  }
+});
+
+function startProjectEdit(id) {
+  const project = projects.find((p) => p.id === id);
+  const li = document.querySelector(`#projectList [data-id="${CSS.escape(id)}"]`);
+  if (!project || !li) return;
+  const titleEl = li.querySelector('[data-title]');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'edit-input';
+  input.value = project.name;
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+  const commit = () => {
+    const val = input.value.trim();
+    if (val) {
+      project.name = val;
+      save(STORAGE_KEYS.projects, projects);
+    }
+    renderTasksAndGoals();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') commit();
+    else if (e.key === 'Escape') renderProjects();
+  });
+  input.addEventListener('blur', commit);
 }
 
 // ---------- Google Calendar ----------
@@ -951,6 +1431,7 @@ function makeTask(fields) {
     priority: 'medium',
     recurrence: null,
     goalId: null,
+    projectId: null,
     ...fields,
   };
 }
@@ -990,6 +1471,7 @@ function spawnNextOccurrence(task) {
     priority: task.priority,
     recurrence: task.recurrence,
     goalId: task.goalId,
+    projectId: task.projectId,
   });
   tasks.push(next);
   task.nextTaskId = next.id;
@@ -1028,8 +1510,10 @@ function taskMetaHTML(task, today) {
     : '';
   const goal = task.goalId && goals.find((g) => g.id === task.goalId);
   const goalBadge = goal ? `<span class="sync-badge">🎯 ${escapeHtml(goal.title)}</span>` : '';
+  const project = projects.find((p) => p.id === taskProjectId(task));
+  const projectBadge = project ? `<span class="sync-badge">📁 ${escapeHtml(project.name)}</span>` : '';
   const syncBadge = task.googleEventId ? '<span class="sync-badge">📅 synced</span>' : '';
-  return `${escapeHtml(label)}${escapeHtml(dueText)} ${priorityBadge}${repeatBadge}${goalBadge}${syncBadge}`;
+  return `${escapeHtml(label)}${escapeHtml(dueText)} ${priorityBadge}${repeatBadge}${goalBadge}${projectBadge}${syncBadge}`;
 }
 
 function taskCardHTML(task, today) {
@@ -1176,6 +1660,7 @@ document.getElementById('taskForm').addEventListener('submit', (e) => {
   const repeatSel = document.getElementById('taskRepeat');
   const prioritySel = document.getElementById('taskPriority');
   const goalSel = document.getElementById('taskGoal');
+  const projectSel = document.getElementById('taskProject');
   const recurrence = repeatSel.value || null;
   const task = addTask({
     title,
@@ -1184,6 +1669,7 @@ document.getElementById('taskForm').addEventListener('submit', (e) => {
     priority: prioritySel.value,
     recurrence,
     goalId: goalSel.value || null,
+    projectId: projectSel.value || null,
   });
   if (!task) return;
   input.value = '';
@@ -1191,6 +1677,7 @@ document.getElementById('taskForm').addEventListener('submit', (e) => {
   repeatSel.value = '';
   prioritySel.value = 'medium';
   goalSel.value = '';
+  projectSel.value = '';
 });
 
 document.getElementById('taskList').addEventListener('click', (e) => {
@@ -1289,7 +1776,11 @@ function startTaskEdit(id) {
   goalSelect.className = 'edit-input';
   goalSelect.setAttribute('aria-label', 'Goal');
   goalSelect.innerHTML = goalOptionsHTML(task.goalId);
-  const controls = [titleInput, dateInput, prioritySelect, repeatSelect, goalSelect];
+  const projectSelect = document.createElement('select');
+  projectSelect.className = 'edit-input';
+  projectSelect.setAttribute('aria-label', 'Project');
+  projectSelect.innerHTML = projectOptionsHTML(task.projectId);
+  const controls = [titleInput, dateInput, prioritySelect, repeatSelect, goalSelect, projectSelect];
   controls.forEach((el) => wrap.appendChild(el));
 
   titleEl.replaceWith(wrap);
@@ -1306,6 +1797,7 @@ function startTaskEdit(id) {
       task.dueDate = dateInput.value || (task.recurrence ? todayKey() : null);
       task.priority = prioritySelect.value;
       task.goalId = goalSelect.value || null;
+      task.projectId = projectSelect.value || null;
       save(STORAGE_KEYS.tasks, tasks);
       pushTaskToCalendar(task);
       renderDashboard();
@@ -1333,6 +1825,7 @@ function startTaskEdit(id) {
 //               daily|weekly|monthly
 //   priority:   !high !medium !low, or "high priority"
 //   goal:       #run matches a goal whose title contains "run"
+//   project:    @home matches a project whose name contains "home"
 const QA_WEEKDAYS = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
 const QA_WEEKDAY_ABBR = { sun: 0, mon: 1, tue: 2, tues: 2, wed: 3, weds: 3, thu: 4, thur: 4, thurs: 4, fri: 5, sat: 6 };
 const QA_MONTHS = {
@@ -1343,10 +1836,19 @@ const QA_MONTHS = {
 const QA_PREP = '(?:(?:by|on|due|due on|before|until)\\s+)?';
 const qaAlt = (obj) => Object.keys(obj).sort((a, b) => b.length - a.length).join('|');
 
-function parseQuickAdd(input, now = new Date(), goalList = goals) {
+function parseQuickAdd(input, now = new Date(), goalList = goals, projectList = projects) {
   let text = ` ${input} `;
   const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const result = { title: '', dueDate: null, recurrence: null, priority: 'medium', goalId: null, unmatchedGoal: null };
+  const result = {
+    title: '',
+    dueDate: null,
+    recurrence: null,
+    priority: 'medium',
+    goalId: null,
+    unmatchedGoal: null,
+    projectId: null,
+    unmatchedProject: null,
+  };
   const take = (re) => {
     const m = text.match(re);
     if (m) text = text.replace(re, ' ');
@@ -1390,6 +1892,20 @@ function parseQuickAdd(input, now = new Date(), goalList = goals) {
       return ' ';
     }
     result.unmatchedGoal = result.unmatchedGoal || tag;
+    return whole;
+  });
+
+  // Project (@name)
+  text = text.replace(/\s@([\p{L}\p{N}_-]+)(?=\s)/gu, (whole, tag) => {
+    const tagN = norm(tag);
+    if (result.projectId || tagN.length < 2) return whole;
+    const matches = projectList.filter((p) => norm(p.name).includes(tagN));
+    const best = matches.find((p) => norm(p.name).startsWith(tagN)) || matches[0];
+    if (best) {
+      result.projectId = best.id;
+      return ' ';
+    }
+    result.unmatchedProject = result.unmatchedProject || tag;
     return whole;
   });
 
@@ -1489,6 +2005,8 @@ function describeQuickAdd(parsed) {
   if (parsed.priority !== 'medium') bits.push(`${PRIORITY_LABELS[parsed.priority]} priority`);
   const goal = parsed.goalId && goals.find((g) => g.id === parsed.goalId);
   if (goal) bits.push(`🎯 ${goal.title}`);
+  const project = parsed.projectId && projects.find((p) => p.id === parsed.projectId);
+  if (project) bits.push(`📁 ${project.name}`);
   return bits.join(' · ');
 }
 
@@ -1513,8 +2031,19 @@ quickAddInput.addEventListener('input', () => {
     setQuickAddPreview('Add a task name, e.g. “pay rent tomorrow”.');
     return;
   }
-  const note = parsed.unmatchedGoal ? ` (no goal matches #${parsed.unmatchedGoal})` : '';
+  const notes = [];
+  if (parsed.unmatchedGoal) notes.push(`no goal matches #${parsed.unmatchedGoal}`);
+  if (parsed.unmatchedProject) notes.push(`no project matches @${parsed.unmatchedProject}`);
+  const note = notes.length ? ` (${notes.join('; ')})` : '';
   setQuickAddPreview(`Will add ${describeQuickAdd(parsed)}${note}`);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  e.preventDefault();
+  quickAddInput.focus();
 });
 
 quickAddInput.addEventListener('keydown', (e) => {
@@ -1539,6 +2068,7 @@ document.getElementById('quickAddForm').addEventListener('submit', (e) => {
     priority: parsed.priority,
     recurrence: parsed.recurrence,
     goalId: parsed.goalId,
+    projectId: parsed.projectId,
   });
   if (!task) return;
   quickAddInput.value = '';
@@ -1703,7 +2233,7 @@ document.getElementById('icsImportCancelBtn').addEventListener('click', cancelIC
 
 // ---------- Backup: export / import ----------
 function hasAnyData() {
-  return habits.length > 0 || journal.length > 0 || goals.length > 0 || tasks.length > 0;
+  return habits.length > 0 || journal.length > 0 || goals.length > 0 || tasks.length > 0 || projects.length > 0;
 }
 
 function daysSinceLastBackup() {
@@ -1720,6 +2250,8 @@ function exportBackup() {
     journal,
     goals,
     tasks,
+    projects,
+    money,
     wheelRatings,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -1743,7 +2275,8 @@ function isValidBackup(data) {
     Array.isArray(data.habits) &&
     Array.isArray(data.journal) &&
     Array.isArray(data.goals) &&
-    (data.tasks === undefined || Array.isArray(data.tasks))
+    (data.tasks === undefined || Array.isArray(data.tasks)) &&
+    (data.projects === undefined || Array.isArray(data.projects))
   );
 }
 
@@ -1768,7 +2301,7 @@ function handleImportFile(file) {
     const taskCount = Array.isArray(data.tasks) ? data.tasks.length : 0;
     summary.textContent =
       `This file has ${data.habits.length} habit(s), ${data.journal.length} journal entr${data.journal.length === 1 ? 'y' : 'ies'}, ` +
-      `${data.goals.length} goal(s), and ${taskCount} task(s)` +
+      `${data.goals.length} goal(s), ${taskCount} task(s), and ${Array.isArray(data.projects) ? data.projects.length : 0} project(s)` +
       (data.exportedAt ? `, exported ${new Date(data.exportedAt).toLocaleString()}` : '') +
       '. Importing will replace your current data. Continue?';
     document.getElementById('importConfirm').classList.add('visible');
@@ -1778,22 +2311,27 @@ function handleImportFile(file) {
 
 function confirmImport() {
   if (!pendingImport) return;
-  const previous = { habits, journal, goals, tasks };
+  const previous = { habits, journal, goals, tasks, projects, money };
   const migrated = migrate({
     habits: pendingImport.habits,
     journal: pendingImport.journal,
     goals: pendingImport.goals,
     tasks: Array.isArray(pendingImport.tasks) ? pendingImport.tasks : [],
+    projects: Array.isArray(pendingImport.projects) ? pendingImport.projects : [],
     schemaVersion: pendingImport.schemaVersion || 0,
   });
   habits = migrated.habits;
   journal = migrated.journal;
   goals = migrated.goals;
   tasks = migrated.tasks;
+  projects = migrated.projects;
+  money = pendingImport.money && typeof pendingImport.money === 'object' ? pendingImport.money : {};
   save(STORAGE_KEYS.habits, habits);
   save(STORAGE_KEYS.journal, journal);
   save(STORAGE_KEYS.goals, goals);
   save(STORAGE_KEYS.tasks, tasks);
+  save(STORAGE_KEYS.projects, projects);
+  save(STORAGE_KEYS.money, money);
   save(STORAGE_KEYS.schemaVersion, migrated.schemaVersion);
   if (pendingImport.wheelRatings && typeof pendingImport.wheelRatings === 'object') {
     wheelRatings = pendingImport.wheelRatings;
@@ -1801,8 +2339,8 @@ function confirmImport() {
   }
   renderHabits();
   renderJournal();
-  renderGoals();
-  renderTasksView();
+  renderTasksAndGoals();
+  renderMoney();
   renderDashboard();
   cancelImport();
   showToast('Backup imported.', () => {
@@ -1810,14 +2348,18 @@ function confirmImport() {
     journal = previous.journal;
     goals = previous.goals;
     tasks = previous.tasks;
+    projects = previous.projects;
+    money = previous.money;
     save(STORAGE_KEYS.habits, habits);
     save(STORAGE_KEYS.journal, journal);
     save(STORAGE_KEYS.goals, goals);
     save(STORAGE_KEYS.tasks, tasks);
+    save(STORAGE_KEYS.projects, projects);
+    save(STORAGE_KEYS.money, money);
     renderHabits();
     renderJournal();
-    renderGoals();
-    renderTasksView();
+    renderTasksAndGoals();
+    renderMoney();
     renderDashboard();
     hideToast();
   });
@@ -1845,11 +2387,13 @@ window.addEventListener('storage', (e) => {
   journal = load(STORAGE_KEYS.journal, []);
   goals = load(STORAGE_KEYS.goals, []);
   tasks = load(STORAGE_KEYS.tasks, []);
+  projects = load(STORAGE_KEYS.projects, []);
+  money = load(STORAGE_KEYS.money, {});
   wheelRatings = load(STORAGE_KEYS.wheelRatings, {});
   renderHabits();
   renderJournal();
-  renderGoals();
-  renderTasksView();
+  renderTasksAndGoals();
+  renderMoney();
   renderDashboard();
 });
 
@@ -1913,18 +2457,12 @@ function renderActivity() {
 
   const grid = document.getElementById('streakGrid');
   grid.innerHTML = [
-    { value: stats.current, label: 'Current streak (days)' },
-    { value: stats.longest, label: 'Longest streak (days)' },
-    { value: stats.activeDays, label: 'Active days total' },
-    { value: stats.totalEvents, label: 'Total check-ins' },
+    { icon: 'flame', value: stats.current, label: 'Current streak (days)' },
+    { icon: 'trending-up', value: stats.longest, label: 'Longest streak (days)' },
+    { icon: 'calendar', value: stats.activeDays, label: 'Active days total' },
+    { icon: 'check-circle', value: stats.totalEvents, label: 'Total check-ins' },
   ]
-    .map(
-      (s) => `
-      <div class="stat-card">
-        <div class="stat-value">${escapeHtml(String(s.value))}</div>
-        <div class="stat-label">${escapeHtml(s.label)}</div>
-      </div>`
-    )
+    .map(kpiHTML)
     .join('');
 
   const today = new Date();
@@ -2121,7 +2659,7 @@ function renderToday() {
     .filter((t) => t.dueDate === today)
     .sort((a, b) => (a.status === 'done') - (b.status === 'done') || byUrgency(a, b));
 
-  const habitStates = habits.map((h) => {
+  const habitStates = habits.filter(habitDueToday).map((h) => {
     const done = h.log.includes(today);
     const streak = habitStreak(h);
     const lastLogged = h.log.length ? [...h.log].sort().pop() : null;
@@ -2151,49 +2689,82 @@ function renderToday() {
     steps.push(`Do a tiny version of “${lapsed[0].habit.name}” today — it’s been ${lapsed[0].daysAgo} days.`);
   }
   if (atRisk.length) {
-    steps.push(`Keep your ${atRisk[0].streak}-day streak alive: “${atRisk[0].habit.name}”.`);
+    steps.push(`Keep your ${atRisk[0].streak}-${habitStreakUnit(atRisk[0].habit)} streak alive: “${atRisk[0].habit.name}”.`);
   }
   const slipping = overdue.length > 0 || lapsed.length > 0;
   const nudgeHTML = steps.length
-    ? `<div class="today-nudge ${slipping ? 'slipping' : ''}">
-        <div class="today-nudge-title">${slipping ? 'Back on track' : 'Streaks to protect'}</div>
-        <ol class="today-steps">${steps.slice(0, 3).map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ol>
+    ? `<div class="nudge ${slipping ? 'slipping' : ''}">
+        <div class="nudge-title">${icon(slipping ? 'alert-triangle' : 'flame')}<span>${slipping ? 'Back on track' : 'Streaks to protect'}</span></div>
+        <ol class="nudge-steps">${steps.slice(0, 3).map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ol>
       </div>`
     : '';
 
-  const habitsHTML = habitStates.length
-    ? `<h2 class="section-heading">Habits</h2>
-       <ul class="item-list">${habitStates
-         .map(
-           ({ habit, done, streak }) => `
-         <li class="item-card">
-           <button class="check-btn ${done ? 'done' : ''}" data-habit="${escapeHtml(habit.id)}" aria-label="${done ? 'Mark not done today' : 'Mark done today'}">${done ? '✓' : ''}</button>
-           <div class="item-main">
-             <div class="item-title">${escapeHtml(habit.name)}</div>
-             <div class="item-meta">🔥 ${streak} day streak</div>
-           </div>
-         </li>`
-         )
-         .join('')}</ul>`
-    : '';
+  const listCard = (iconName, title, count, body, tone = '') => `
+    <section class="card list-card ${tone}">
+      <header class="card-head">
+        <div class="card-title">${icon(iconName)}<span>${escapeHtml(title)}</span><span class="count-pill">${count}</span></div>
+      </header>
+      <ul class="item-list">${body}</ul>
+    </section>`;
 
+  const habitsBody = habitStates
+    .map(
+      ({ habit, done }) => `
+      <li class="item-card">
+        <button class="check-btn ${done ? 'done' : ''}" data-habit="${escapeHtml(habit.id)}" aria-label="${done ? 'Mark not done today' : 'Mark done today'}">${done ? '✓' : ''}</button>
+        <div class="item-main">
+          <div class="item-title">${escapeHtml(habit.name)}</div>
+          <div class="item-meta">${escapeHtml(habitStreakText(habit))}</div>
+        </div>
+      </li>`
+    )
+    .join('');
+
+  const openDue = dueToday.filter((t) => t.status !== 'done').length;
+  const habitsLeft = habitStates.filter((h) => !h.done).length;
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  let sentence;
+  if (totalCount === 0 && overdue.length === 0) sentence = 'Nothing is scheduled yet. Add a task or a habit to get started.';
+  else if (openDue === 0 && habitsLeft === 0 && overdue.length === 0) sentence = 'Everything for today is done. Nice work.';
+  else {
+    const parts = [`<strong>${plural(openDue, 'task')}</strong> due today`];
+    if (overdue.length) parts.push(`<strong>${overdue.length} overdue</strong>`);
+    if (habitStates.length) parts.push(`<strong>${plural(habitsLeft, 'habit')}</strong> left`);
+    sentence = `You have ${parts.join(', ')}.`;
+  }
   const empty = !overdue.length && !dueToday.length && !habitStates.length;
 
   root.innerHTML = `
-    <div class="today-header">
-      <div>
-        <div class="today-date">${escapeHtml(dateLabel)}</div>
-        <div class="item-meta">${totalCount ? `${doneCount} of ${totalCount} done` : 'Nothing scheduled yet'}</div>
-      </div>
-      <div class="today-pct">${pct}%</div>
+    <div class="hero">
+      <h2 class="hero-title">${greeting}</h2>
+      <p class="hero-sub">${escapeHtml(dateLabel)} · ${sentence}</p>
     </div>
-    <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+    <div class="kpi-strip">
+      ${kpiHTML({
+        icon: 'check-circle',
+        label: 'Progress today',
+        value: `${pct}%`,
+        sub: totalCount ? `${doneCount} of ${totalCount} done` : 'Nothing scheduled',
+        extra: `<div class="progress-track kpi-progress"><div class="progress-fill" style="width:${pct}%"></div></div>`,
+      })}
+      ${kpiHTML({ icon: 'calendar-check', label: 'Due today', value: openDue, sub: `${dueToday.length - openDue} completed` })}
+      ${kpiHTML({
+        icon: 'alert-triangle',
+        label: 'Overdue',
+        value: overdue.length,
+        sub: overdue.length ? 'Needs attention' : 'All caught up',
+        tone: overdue.length ? 'neg' : 'pos',
+      })}
+      ${kpiHTML({ icon: 'flame', label: 'Habits left', value: habitsLeft, sub: `${habitStates.length} scheduled today` })}
+    </div>
     ${nudgeHTML}
-    ${overdue.length ? `<h2 class="section-heading overdue-heading">Overdue</h2><ul class="item-list">${overdue.map((t) => todayTaskRowHTML(t, today, { reschedule: true })).join('')}</ul>` : ''}
-    ${dueToday.length ? `<h2 class="section-heading">Due today</h2><ul class="item-list">${dueToday.map((t) => todayTaskRowHTML(t, today)).join('')}</ul>` : ''}
-    ${habitsHTML}
-    ${empty ? '<p class="empty-state">Nothing for today. Add a task due today or a habit to get started.</p>' : ''}
+    ${overdue.length ? listCard('alert-triangle', 'Overdue', overdue.length, overdue.map((t) => todayTaskRowHTML(t, today, { reschedule: true })).join(''), 'danger') : ''}
+    ${dueToday.length ? listCard('calendar-check', 'Due today', dueToday.length, dueToday.map((t) => todayTaskRowHTML(t, today)).join('')) : ''}
+    ${habitStates.length ? listCard('flame', 'Habits', habitStates.length, habitsBody) : ''}
+    ${empty ? '<p class="empty-state">Nothing for today. Use the quick add bar above to add a task.</p>' : ''}
   `;
 }
 
@@ -2218,11 +2789,52 @@ document.getElementById('todayContent').addEventListener('click', (e) => {
 });
 
 // ---------- Dashboard ----------
+function kpiHTML({ icon: name, label, value, sub = '', tone = '', extra = '' }) {
+  return `
+    <div class="kpi">
+      <div class="kpi-label">${icon(name)}<span>${escapeHtml(label)}</span></div>
+      <div class="kpi-value">${escapeHtml(String(value))}</div>
+      ${sub ? `<div class="kpi-sub ${tone}">${escapeHtml(sub)}</div>` : ''}
+      ${extra}
+    </div>`;
+}
+
+function renderTaskStatus() {
+  const el = document.getElementById('taskStatusCard');
+  if (!el) return;
+  const counts = { todo: 0, in_progress: 0, done: 0 };
+  tasks.forEach((t) => {
+    counts[counts[t.status] === undefined ? 'todo' : t.status]++;
+  });
+  const total = tasks.length;
+  const rows = TASK_STATUSES.map((st, i) => ({ st, i, n: counts[st], pct: total ? Math.round((counts[st] / total) * 100) : 0 }));
+  el.innerHTML = `
+    <div class="card-head">
+      <div class="card-title">${icon('list-checks')}<span>Task status</span></div>
+      <span class="card-sub">${total} task${total === 1 ? '' : 's'}</span>
+    </div>
+    ${
+      total
+        ? `<div class="stack-bar" role="img" aria-label="Task status breakdown">${rows
+            .filter((r) => r.n)
+            .map((r) => `<span class="stack-seg seg-${r.i + 1}" style="width:${(r.n / total) * 100}%"></span>`)
+            .join('')}</div>
+           <div class="stack-legend">${rows
+             .map(
+               (r) =>
+                 `<span class="legend-item"><span class="legend-dot seg-${r.i + 1}"></span>${escapeHtml(TASK_STATUS_LABELS[r.st])}<b>${r.n}</b><span class="legend-pct">${r.pct}%</span></span>`
+             )
+             .join('')}</div>`
+        : '<p class="empty-state">No tasks yet. Add one with the quick add bar.</p>'
+    }`;
+}
+
 function renderDashboard() {
   const grid = document.getElementById('dashboardGrid');
   const today = todayKey();
-  const habitsDoneToday = habits.filter((h) => h.log.includes(today)).length;
-  const bestStreak = habits.reduce((max, h) => Math.max(max, habitStreak(h)), 0);
+  const dueHabits = habits.filter(habitDueToday);
+  const habitsDoneToday = dueHabits.filter((h) => h.log.includes(today)).length;
+  const bestStreak = habits.reduce((max, h) => (habitStreakUnit(h) === 'day' ? Math.max(max, habitStreak(h)) : max), 0);
   const activeGoals = goals.filter((g) => goalProgress(g).pct < 100).length;
   const completedGoals = goals.filter((g) => goalProgress(g).pct >= 100).length;
   const latestMood = journal.length
@@ -2232,25 +2844,24 @@ function renderDashboard() {
   const overdueTasks = tasks.filter((t) => t.status !== 'done' && t.dueDate && t.dueDate < today).length;
 
   const stats = [
-    { value: `${habitsDoneToday}/${habits.length || 0}`, label: 'Habits done today' },
-    { value: bestStreak, label: 'Best streak (days)' },
-    { value: activeGoals, label: 'Active goals' },
-    { value: completedGoals, label: 'Goals completed' },
-    { value: journal.length, label: 'Journal entries' },
-    { value: latestMood, label: 'Latest mood' },
-    { value: tasksDueToday, label: 'Tasks due today' },
-    { value: overdueTasks, label: 'Overdue tasks' },
+    { icon: 'check-circle', value: `${habitsDoneToday}/${dueHabits.length}`, label: 'Habits done today' },
+    { icon: 'flame', value: bestStreak, label: 'Best streak (days)' },
+    { icon: 'target', value: activeGoals, label: 'Active goals' },
+    { icon: 'flag', value: completedGoals, label: 'Goals completed' },
+    { icon: 'book-open', value: journal.length, label: 'Journal entries' },
+    { icon: 'smile', value: latestMood, label: 'Latest mood' },
+    { icon: 'calendar-check', value: tasksDueToday, label: 'Tasks due today' },
+    {
+      icon: 'alert-triangle',
+      value: overdueTasks,
+      label: 'Overdue tasks',
+      sub: overdueTasks ? 'Needs attention' : 'All caught up',
+      tone: overdueTasks ? 'neg' : 'pos',
+    },
   ];
 
-  grid.innerHTML = stats
-    .map(
-      (s) => `
-      <div class="stat-card">
-        <div class="stat-value">${escapeHtml(String(s.value))}</div>
-        <div class="stat-label">${escapeHtml(s.label)}</div>
-      </div>`
-    )
-    .join('');
+  grid.innerHTML = stats.map(kpiHTML).join('');
+  renderTaskStatus();
 
   renderActivity();
   renderCalendar();
@@ -2313,8 +2924,24 @@ function habitCompletionRate(habit) {
   const start = new Date(today);
   start.setDate(start.getDate() - (days - 1));
   const startKey = localDateKey(start);
-  const done = new Set(habit.log.filter((d) => d >= startKey && d <= localDateKey(today))).size;
-  return done / days;
+  const logged = habit.log.filter((d) => d >= startKey && d <= localDateKey(today));
+  const f = habitFrequency(habit);
+
+  if (f.type === 'weekly') {
+    const expected = Math.max(1, Math.round(days / 7));
+    const weeks = new Set(logged.map((k) => weekStartKey(new Date(`${k}T00:00:00`)))).size;
+    return Math.min(1, weeks / expected);
+  }
+  if (f.type === 'days') {
+    let expected = 0;
+    const cursor = new Date(start);
+    for (let i = 0; i < days; i++) {
+      if (f.days.includes(cursor.getDay())) expected++;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return Math.min(1, new Set(logged).size / Math.max(1, expected));
+  }
+  return new Set(logged).size / days;
 }
 
 function wheelScores() {
@@ -2400,14 +3027,327 @@ document.getElementById('wheelList').addEventListener('change', (e) => {
 
 document.getElementById('habitArea').innerHTML = areaOptionsHTML(null);
 
+// ---------- Money ----------
+// Monthly income drives a 50/30/20 split and a sinking-fund calculator.
+// Everything stays local, like the rest of the app.
+function moneyCurrency() {
+  return typeof money.currency === 'string' ? money.currency : '$';
+}
+
+function moneyIncome() {
+  return typeof money.income === 'number' && money.income >= 0 ? money.income : 0;
+}
+
+function fmtMoney(n) {
+  return `${moneyCurrency()}${Math.round(n).toLocaleString()}`;
+}
+
+const MONEY_SPLITS = [
+  { key: 'needs', label: 'Needs', pct: 50, hint: 'Housing, utilities, groceries, transport' },
+  { key: 'wants', label: 'Wants', pct: 30, hint: 'Eating out, hobbies, entertainment' },
+  { key: 'savings', label: 'Savings & debt', pct: 20, hint: 'Emergency fund, investing, debt repayment' },
+];
+
+function renderMoney() {
+  const incomeInput = document.getElementById('moneyIncome');
+  const currencyInput = document.getElementById('moneyCurrency');
+  if (!incomeInput) return;
+  if (document.activeElement !== incomeInput) incomeInput.value = typeof money.income === 'number' ? money.income : '';
+  if (document.activeElement !== currencyInput) currencyInput.value = moneyCurrency();
+
+  const income = moneyIncome();
+  document.getElementById('moneyAllocation').innerHTML = income
+    ? MONEY_SPLITS.map(
+        (r) => `
+        <div class="money-row">
+          <div class="money-row-head">
+            <span class="money-row-label">${escapeHtml(r.label)}</span>
+            <span class="money-row-amount">${escapeHtml(fmtMoney((income * r.pct) / 100))} <span class="item-meta">${r.pct}%</span></span>
+          </div>
+          <div class="progress-track"><div class="progress-fill money-${r.key}" style="width:${r.pct}%"></div></div>
+          <div class="item-meta">${escapeHtml(r.hint)}</div>
+        </div>`
+      ).join('')
+    : '<p class="empty-state">Enter your monthly after-tax income above to see your split.</p>';
+  renderSinkingFund();
+}
+
+function renderSinkingFund() {
+  const target = parseFloat(document.getElementById('sfTarget').value);
+  const months = parseInt(document.getElementById('sfMonths').value, 10);
+  const out = document.getElementById('sfResult');
+  if (!(target > 0) || !(months > 0)) {
+    out.textContent = 'Enter a target and a number of months.';
+    return;
+  }
+  const monthly = target / months;
+  const income = moneyIncome();
+  const share = income ? ` — ${Math.round((monthly / income) * 100)}% of your income` : '';
+  out.textContent = `Set aside ${fmtMoney(monthly)} a month${share}.`;
+}
+
+document.getElementById('moneyForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const raw = document.getElementById('moneyIncome').value.trim();
+  const status = document.getElementById('moneyStatus');
+  const income = raw === '' ? null : parseFloat(raw);
+  if (income !== null && (Number.isNaN(income) || income < 0)) {
+    status.textContent = 'Enter a positive number for your income.';
+    status.classList.add('error');
+    return;
+  }
+  const currency = document.getElementById('moneyCurrency').value.trim().slice(0, 4);
+  money = { income, currency: currency || '$' };
+  if (save(STORAGE_KEYS.money, money)) {
+    status.textContent = 'Saved.';
+    status.classList.remove('error');
+    setTimeout(() => {
+      status.textContent = '';
+    }, 3000);
+  }
+  renderMoney();
+});
+
+['sfTarget', 'sfMonths'].forEach((id) => document.getElementById(id).addEventListener('input', renderSinkingFund));
+
+// ---------- Theme ----------
+function currentTheme() {
+  return (
+    document.documentElement.dataset.theme ||
+    (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+  );
+}
+
+function applyTheme(theme) {
+  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  const btn = document.getElementById('themeToggle');
+  if (btn) {
+    const dark = currentTheme() === 'dark';
+    btn.setAttribute('aria-pressed', String(dark));
+    btn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+    btn.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+    btn.innerHTML = icon(dark ? 'sun' : 'moon');
+  }
+}
+
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  save(STORAGE_KEYS.theme, next);
+});
+
+// ---------- AI helpers (optional) ----------
+// The server only exposes /api/ai/* when GEMINI_API_KEY is set. We probe once
+// and reveal the AI controls only if it answers, so static hosting and
+// key-less setups never show buttons that can't work.
+let aiAvailable = false;
+
+async function aiRequest(kind, body) {
+  const res = await fetch(`/api/ai/${kind}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `AI request failed (${res.status})`);
+  return data;
+}
+
+async function detectAI() {
+  try {
+    const res = await fetch('/api/ai/status');
+    if (res.ok) aiAvailable = !!(await res.json()).enabled;
+  } catch {
+    aiAvailable = false;
+  }
+  document.querySelectorAll('.ai-only').forEach((el) => {
+    el.hidden = !aiAvailable;
+  });
+}
+
+async function withBusy(btn, label, fn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = label;
+  try {
+    await fn();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+function aiListHTML(items, { addTask: withAdd = false } = {}) {
+  if (!items.length) return '<p class="item-meta">Nothing suggested.</p>';
+  return `<ul class="ai-list">${items
+    .map(
+      (t) =>
+        `<li><span>${escapeHtml(t)}</span>${withAdd ? ` <button type="button" class="mini-btn" data-add-task="${escapeHtml(t)}">+ Task</button>` : ''}</li>`
+    )
+    .join('')}</ul>`;
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-add-task]');
+  if (!btn || btn.disabled) return;
+  const task = addTask({ title: btn.dataset.addTask.slice(0, 200) });
+  if (task) {
+    btn.textContent = 'Added ✓';
+    btn.disabled = true;
+  }
+});
+
+// Goal plan
+const goalPlanPanel = document.getElementById('goalPlanPanel');
+let pendingPlan = null;
+
+document.getElementById('goalPlanBtn').addEventListener('click', () => {
+  if (!document.getElementById('goalInput').value.trim()) {
+    showWarning('Type your goal first, then ask for a plan.');
+    return;
+  }
+  goalPlanPanel.hidden = false;
+  document.getElementById('goalPlanResult').innerHTML = '';
+  pendingPlan = null;
+  document.getElementById('goalAvailability').focus();
+});
+
+document.getElementById('goalPlanClose').addEventListener('click', () => {
+  goalPlanPanel.hidden = true;
+  pendingPlan = null;
+});
+
+document.getElementById('goalPlanGo').addEventListener('click', (e) => {
+  const goalText = document.getElementById('goalInput').value.trim();
+  const availability = document.getElementById('goalAvailability').value.trim() || 'flexible';
+  if (!goalText) return;
+  const result = document.getElementById('goalPlanResult');
+  withBusy(e.currentTarget, 'Thinking…', async () => {
+    try {
+      const plan = await aiRequest('plan', { goalText, availability });
+      pendingPlan = plan;
+      result.innerHTML = `
+        <h4>Phases</h4>
+        <ol class="ai-list">${plan.phases.map((p) => `<li>${escapeHtml(p)}</li>`).join('')}</ol>
+        <h4>Weekly tasks</h4>
+        <ul class="ai-list checks">${plan.tasks
+          .map((t, i) => `<li><label><input type="checkbox" data-plan-task="${i}" checked> ${escapeHtml(t)}</label></li>`)
+          .join('')}</ul>
+        <h4>14-day checkpoints</h4>
+        <ul class="ai-list checks">${plan.checkpoints
+          .map((t, i) => `<li><label><input type="checkbox" data-plan-check="${i}" checked> ${escapeHtml(t)}</label></li>`)
+          .join('')}</ul>
+        <button type="button" id="goalPlanApply">Add goal + selected tasks</button>`;
+    } catch (err) {
+      result.innerHTML = `<p class="ai-error">${escapeHtml(err.message)}</p>`;
+    }
+  });
+});
+
+document.getElementById('goalPlanResult').addEventListener('click', (e) => {
+  if (!e.target.closest('#goalPlanApply') || !pendingPlan) return;
+  const title = document.getElementById('goalInput').value.trim();
+  if (!title) return;
+  const goal = {
+    id: uid(),
+    title,
+    dueDate: document.getElementById('goalDate').value || null,
+    progress: 0,
+    projectId: document.getElementById('goalProject').value || null,
+  };
+  goals.push(goal);
+  save(STORAGE_KEYS.goals, goals);
+
+  const picked = (attr) =>
+    [...document.querySelectorAll(`#goalPlanResult [${attr}]:checked`)].map((el) => Number(el.getAttribute(attr)));
+  const taskIdx = picked('data-plan-task');
+  const checkIdx = picked('data-plan-check');
+  taskIdx.forEach((i) => tasks.push(makeTask({ title: pendingPlan.tasks[i], goalId: goal.id })));
+  // Spread checkpoints evenly across the next 14 days.
+  checkIdx.forEach((i, n) => {
+    const d = new Date();
+    d.setDate(d.getDate() + Math.round(((n + 1) / checkIdx.length) * 14));
+    tasks.push(makeTask({ title: pendingPlan.checkpoints[i], goalId: goal.id, dueDate: localDateKey(d), priority: 'high' }));
+  });
+  save(STORAGE_KEYS.tasks, tasks);
+
+  document.getElementById('goalInput').value = '';
+  document.getElementById('goalDate').value = '';
+  document.getElementById('goalProject').value = '';
+  goalPlanPanel.hidden = true;
+  pendingPlan = null;
+  renderTasksAndGoals();
+  renderDashboard();
+  showWarning(`Added “${title}” with ${taskIdx.length + checkIdx.length} task(s).`);
+});
+
+// Journal: decision helper + summary
+function entryText(entry) {
+  return `${new Date(entry.createdAt).toLocaleDateString()} (${entry.mood}): ${entry.text}`.slice(0, 800);
+}
+
+document.getElementById('decisionBtn').addEventListener('click', (e) => {
+  const decision = document.getElementById('decisionInput').value.trim();
+  const out = document.getElementById('decisionResult');
+  if (!decision) {
+    out.innerHTML = '<p class="ai-error">Describe the decision first.</p>';
+    return;
+  }
+  const entries = [...journal].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5).map(entryText);
+  withBusy(e.currentTarget, 'Thinking…', async () => {
+    try {
+      const r = await aiRequest('decision', { decision, entries });
+      out.innerHTML = `
+        <h4>Pros</h4>${aiListHTML(r.pros)}
+        <h4>Cons</h4>${aiListHTML(r.cons)}
+        <h4>Suggested next step</h4><p>${escapeHtml(r.nextStep)}</p>
+        <h4>Small ways to test it</h4>${aiListHTML(r.microTasks, { addTask: true })}`;
+    } catch (err) {
+      out.innerHTML = `<p class="ai-error">${escapeHtml(err.message)}</p>`;
+    }
+  });
+});
+
+document.getElementById('summaryBtn').addEventListener('click', (e) => {
+  const out = document.getElementById('summaryResult');
+  if (journal.length === 0) {
+    out.innerHTML = '<p class="ai-error">Write a few journal entries first.</p>';
+    return;
+  }
+  const sorted = [...journal].sort((a, b) => b.createdAt - a.createdAt);
+  const weekAgo = Date.now() - 7 * 86400000;
+  let recent = sorted.filter((j) => j.createdAt >= weekAgo);
+  if (recent.length === 0) recent = sorted.slice(0, 5);
+  const recentIds = new Set(recent.map((j) => j.id));
+  const past = sorted.filter((j) => !recentIds.has(j.id)).slice(0, 5);
+  withBusy(e.currentTarget, 'Thinking…', async () => {
+    try {
+      const r = await aiRequest('summary', {
+        entries: recent.slice(0, 15).map(entryText),
+        pastEntries: past.map(entryText),
+      });
+      out.innerHTML = `
+        <h4>Summary</h4><p>${escapeHtml(r.summary)}</p>
+        <h4>Suggested actions</h4>${aiListHTML(r.actionItems, { addTask: true })}`;
+    } catch (err) {
+      out.innerHTML = `<p class="ai-error">${escapeHtml(err.message)}</p>`;
+    }
+  });
+});
+
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
 }
 
+applyTheme(load(STORAGE_KEYS.theme, null));
 renderHabits();
 renderJournal();
 renderGoals();
 renderTasksView();
+renderProjects();
+renderMoney();
 renderDashboard();
+detectAI();

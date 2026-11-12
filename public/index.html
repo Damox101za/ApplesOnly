@@ -5,240 +5,366 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Life Tracker</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%8D%8E%3C/text%3E%3C/svg%3E">
+  <script>try{var t=JSON.parse(localStorage.getItem('lifeTracker.theme'));if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;}catch(e){}</script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="app-header">
-    <h1>Life Tracker</h1>
-    <p class="subtitle">Habits, journal, goals &amp; tasks, all in one place.</p>
-  </header>
+  <a href="#main" class="skip-link">Skip to main content</a>
 
-  <div class="warning-banner" id="warningBanner"></div>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <span class="brand-logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20c4.4 0 8-3.1 8-7.5 0-3.5-2.3-5-4.5-5-1.4 0-2.6.6-3.5 1.5C11.1 8.100 9.900 7.500 8.500 7.500 6.300 7.500 4 9 4 12.500 4 16.900 7.600 20 12 20Z"/><path d="M12 8c0-2 1-3.500 3-4.500"/></svg>
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">Life Tracker</span>
+            <span class="brand-sub">Personal</span>
+          </span>
+        </div>
+      </div>
+      <nav class="sidebar-nav" id="tabs" aria-label="Sections"></nav>
+      <div class="sidebar-footer">Your data stays on this device.</div>
+    </aside>
 
-  <nav class="tabs" id="tabs">
-    <button class="tab-btn active" data-tab="today">Today</button>
-    <button class="tab-btn" data-tab="dashboard">Dashboard</button>
-    <button class="tab-btn" data-tab="habits">Habits</button>
-    <button class="tab-btn" data-tab="journal">Journal</button>
-    <button class="tab-btn" data-tab="goals">Goals</button>
-    <button class="tab-btn" data-tab="wheel">Wheel</button>
-    <button class="tab-btn" data-tab="tasks">Tasks</button>
-    <button class="tab-btn" data-tab="calendar">Calendar</button>
-  </nav>
+    <div class="panel-wrap">
+      <div class="panel">
+        <header class="panel-header">
+          <span class="page-icon" id="pageIcon" aria-hidden="true"></span>
+          <h1 class="page-title" id="pageTitle">Today</h1>
+          <div class="header-actions">
+            <form id="quickAddForm" class="quick-add" autocomplete="off">
+              <div class="quick-add-field">
+                <svg class="icon quick-add-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                <input type="text" id="quickAddInput" placeholder="Quick add: pay rent every month !high" aria-label="Quick add a task">
+                <kbd class="quick-add-kbd" aria-hidden="true">/</kbd>
+                <div class="quick-add-preview" id="quickAddPreview" aria-live="polite"></div>
+              </div>
+              <button type="submit" class="quick-add-btn">Add</button>
+            </form>
+            <button type="button" id="themeToggle" class="icon-btn" aria-label="Toggle theme"></button>
+          </div>
+        </header>
 
-  <div class="quick-add-wrap">
-    <form id="quickAddForm" class="inline-form" autocomplete="off">
-      <input type="text" id="quickAddInput" placeholder="Quick add a task, e.g. pay rent every month !high" aria-label="Quick add a task">
-      <button type="submit">Add</button>
-    </form>
-    <div class="quick-add-preview" id="quickAddPreview" aria-live="polite"></div>
+        <div class="warning-banner" id="warningBanner" role="status"></div>
+
+        <main id="main" tabindex="-1">
+          <section id="today" class="tab-panel active">
+            <div id="todayContent"></div>
+          </section>
+
+          <section id="tasks" class="tab-panel">
+            <div class="card" id="googleCard">
+              <div class="google-header">
+                <div>
+                  <div class="card-title-plain">Google Calendar</div>
+                  <div class="google-status" id="googleStatus">Not connected.</div>
+                </div>
+                <div class="google-actions">
+                  <button type="button" id="googleConnectBtn">Connect</button>
+                  <button type="button" id="googleSyncBtn" class="secondary-btn" hidden>Sync now</button>
+                  <button type="button" id="googleDisconnectBtn" class="secondary-btn" hidden>Disconnect</button>
+                </div>
+              </div>
+              <details class="google-setup">
+                <summary>Google Client ID setup</summary>
+                <p>
+                  Tasks with a due date can create matching events on your Google Calendar.
+                  You'll need an OAuth Client ID from your own Google Cloud project
+                  (it's not a secret — safe to store here). Ask for setup steps if you
+                  haven't made one yet.
+                </p>
+                <div class="inline-form">
+                  <input type="text" id="googleClientIdInput" placeholder="xxxxx.apps.googleusercontent.com">
+                  <button type="button" id="googleClientIdSaveBtn">Save</button>
+                </div>
+              </details>
+            </div>
+
+            <div class="card" id="icsCard">
+              <div class="google-header">
+                <div>
+                  <div class="card-title-plain">Import / export calendar (.ics)</div>
+                  <div class="google-status">Works with any calendar app — Google, Apple, Outlook, or a forwarded invite.</div>
+                </div>
+                <div class="google-actions">
+                  <button type="button" id="icsExportBtn" class="secondary-btn">Export .ics</button>
+                  <label class="file-btn">
+                    Import .ics
+                    <input type="file" id="icsImportFile" accept=".ics,text/calendar">
+                  </label>
+                </div>
+              </div>
+              <div class="import-confirm" id="icsImportConfirm">
+                <p id="icsImportSummary"></p>
+                <div class="import-confirm-actions">
+                  <button type="button" id="icsImportCancelBtn" class="secondary-btn">Cancel</button>
+                  <button type="button" id="icsImportConfirmBtn">Add as tasks</button>
+                </div>
+              </div>
+            </div>
+
+            <form id="taskForm" class="inline-form form-grid">
+              <input type="text" id="taskInput" class="span-all" placeholder="New task, e.g. Renew passport" required>
+              <input type="date" id="taskDate" aria-label="Due date">
+              <select id="taskPriority" aria-label="Priority">
+                <option value="high">High priority</option>
+                <option value="medium" selected>Medium priority</option>
+                <option value="low">Low priority</option>
+              </select>
+              <select id="taskRepeat" aria-label="Repeat">
+                <option value="">Does not repeat</option>
+                <option value="daily">Repeats daily</option>
+                <option value="weekly">Repeats weekly</option>
+                <option value="monthly">Repeats monthly</option>
+              </select>
+              <select id="taskGoal" aria-label="Goal">
+                <option value="">No goal</option>
+              </select>
+              <select id="taskProject" aria-label="Project">
+                <option value="">No project</option>
+              </select>
+              <button type="submit">Add Task</button>
+            </form>
+
+            <div class="view-toggle" id="taskViewToggle" role="group" aria-label="Task view">
+              <button type="button" class="view-toggle-btn" data-view="list">List</button>
+              <button type="button" class="view-toggle-btn" data-view="board">Board</button>
+            </div>
+
+            <ul class="item-list" id="taskList"></ul>
+            <div class="board" id="taskBoard" hidden></div>
+          </section>
+
+          <section id="calendar" class="tab-panel">
+            <div class="card" id="calendarToolbar">
+              <div class="google-header">
+                <div>
+                  <div class="card-title-plain" id="calendarMonthLabel"></div>
+                  <div class="google-status">Tasks and goals due this month.</div>
+                </div>
+                <div class="google-actions">
+                  <button type="button" id="calendarPrevBtn" class="secondary-btn">‹ Prev</button>
+                  <button type="button" id="calendarTodayBtn" class="secondary-btn">Today</button>
+                  <button type="button" id="calendarNextBtn" class="secondary-btn">Next ›</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="calendar-daylabels">
+              <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+            </div>
+            <div class="calendar-grid" id="calendarGrid"></div>
+
+            <div class="card calendar-day-detail" id="calendarDayDetail" hidden>
+              <h3 id="calendarDayDetailTitle"></h3>
+              <ul class="item-list" id="calendarDayDetailList"></ul>
+            </div>
+          </section>
+
+          <section id="habits" class="tab-panel">
+            <form id="habitForm" class="inline-form form-grid">
+              <input type="text" id="habitInput" class="span-all" placeholder="New habit, e.g. Drink water" required>
+              <select id="habitArea" class="area-select" aria-label="Life area"></select>
+              <div id="habitFreqMount" class="freq-mount"></div>
+              <button type="submit">Add Habit</button>
+            </form>
+            <ul class="item-list" id="habitList"></ul>
+          </section>
+
+          <section id="journal" class="tab-panel">
+            <div class="card ai-only" id="journalAI" hidden>
+              <div class="card-head">
+                <div class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M17 5h4"/></svg><span>AI helpers</span></div>
+              </div>
+              <div class="ai-grid">
+                <div class="ai-block">
+                  <label for="decisionInput" class="ai-label">Facing a decision?</label>
+                  <textarea id="decisionInput" rows="2" maxlength="500" placeholder="e.g. Should I take the new job offer?"></textarea>
+                  <button type="button" id="decisionBtn" class="secondary-btn">Weigh it up</button>
+                  <div id="decisionResult" class="ai-result"></div>
+                </div>
+                <div class="ai-block">
+                  <div class="ai-label">Recent entries</div>
+                  <p class="item-meta">Summarize your last 7 days and get three suggested actions.</p>
+                  <button type="button" id="summaryBtn" class="secondary-btn">Summarize</button>
+                  <div id="summaryResult" class="ai-result"></div>
+                </div>
+              </div>
+            </div>
+
+            <form id="journalForm" class="stacked-form">
+              <div class="mood-picker" id="moodPicker" role="radiogroup" aria-label="Mood">
+                <button type="button" class="mood-btn" data-mood="😄" role="radio" aria-checked="false">😄</button>
+                <button type="button" class="mood-btn selected" data-mood="🙂" role="radio" aria-checked="true">🙂</button>
+                <button type="button" class="mood-btn" data-mood="😐" role="radio" aria-checked="false">😐</button>
+                <button type="button" class="mood-btn" data-mood="🙁" role="radio" aria-checked="false">🙁</button>
+                <button type="button" class="mood-btn" data-mood="😢" role="radio" aria-checked="false">😢</button>
+              </div>
+              <textarea id="journalInput" placeholder="What's on your mind today?" rows="3" required></textarea>
+              <input type="text" id="journalTags" placeholder="Tags (comma separated), e.g. work, gratitude" aria-label="Tags">
+              <button type="submit">Add Entry</button>
+            </form>
+            <div class="tag-row filter-row" id="journalFilter" hidden></div>
+            <ul class="item-list" id="journalList"></ul>
+          </section>
+
+          <section id="goals" class="tab-panel">
+            <form id="goalForm" class="inline-form form-grid">
+              <input type="text" id="goalInput" class="span-all" placeholder="New goal, e.g. Run a 5k" required>
+              <input type="date" id="goalDate" aria-label="Due date">
+              <select id="goalProject" aria-label="Project">
+                <option value="">No project</option>
+              </select>
+              <button type="button" id="goalPlanBtn" class="secondary-btn ai-only" hidden>✨ Plan with AI</button>
+              <button type="submit">Add Goal</button>
+            </form>
+            <div class="card ai-panel" id="goalPlanPanel" hidden>
+              <div class="card-head">
+                <div class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M17 5h4"/></svg><span>AI plan</span></div>
+                <button type="button" id="goalPlanClose" class="icon-btn small" aria-label="Close">✕</button>
+              </div>
+              <div class="inline-form">
+                <input type="text" id="goalAvailability" maxlength="200" placeholder="When can you work on it? e.g. evenings and weekends" aria-label="Availability">
+                <button type="button" id="goalPlanGo">Generate plan</button>
+              </div>
+              <div id="goalPlanResult" class="ai-result"></div>
+            </div>
+            <ul class="item-list" id="goalList"></ul>
+          </section>
+
+          <section id="projects" class="tab-panel">
+            <form id="projectForm" class="inline-form">
+              <input type="text" id="projectInput" placeholder="New project, e.g. Home renovation" required>
+              <button type="submit">Add Project</button>
+            </form>
+            <ul class="item-list project-list" id="projectList"></ul>
+          </section>
+
+          <section id="dashboard" class="tab-panel">
+            <div class="kpi-strip" id="dashboardGrid"></div>
+
+            <div class="card" id="taskStatusCard"></div>
+
+            <section class="activity-section">
+              <h2 class="section-heading">Streak &amp; activity</h2>
+              <div class="kpi-strip" id="streakGrid"></div>
+
+              <div class="card heatmap-wrap">
+                <div class="heatmap-row">
+                  <div class="heatmap-daylabels">
+                    <span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>
+                  </div>
+                  <div class="heatmap-scroll">
+                    <div class="heatmap-months" id="activityMonths"></div>
+                    <div class="heatmap" id="activityHeatmap"></div>
+                  </div>
+                </div>
+                <div class="heatmap-legend">
+                  <span>Less</span>
+                  <span class="heat-swatch heat-0"></span>
+                  <span class="heat-swatch heat-1"></span>
+                  <span class="heat-swatch heat-2"></span>
+                  <span class="heat-swatch heat-3"></span>
+                  <span class="heat-swatch heat-4"></span>
+                  <span>More</span>
+                </div>
+              </div>
+            </section>
+
+            <div class="card backup-card" id="backupCard">
+              <div class="backup-info">
+                <div class="backup-title">Backup</div>
+                <div class="backup-status" id="backupStatus"></div>
+              </div>
+              <div class="backup-actions">
+                <button type="button" id="exportBtn">Export backup</button>
+                <label class="file-btn">
+                  Import backup
+                  <input type="file" id="importFile" accept="application/json">
+                </label>
+              </div>
+            </div>
+
+            <div class="import-confirm" id="importConfirm">
+              <p id="importSummary"></p>
+              <div class="import-confirm-actions">
+                <button type="button" id="importCancelBtn" class="secondary-btn">Cancel</button>
+                <button type="button" id="importConfirmBtn">Replace my data</button>
+              </div>
+            </div>
+          </section>
+
+          <section id="wheel" class="tab-panel">
+            <p class="wheel-intro">
+              Each area is scored 0–10 from how often you did its habits in the last 30 days.
+              Areas with no habits use the slider instead. Tag habits with an area on the Habits tab.
+            </p>
+            <div class="card wheel-chart" id="wheelChart"></div>
+            <ul class="item-list" id="wheelList"></ul>
+          </section>
+
+          <section id="money" class="tab-panel">
+            <div class="card">
+              <header class="card-head"><div class="card-title"><span>Your snapshot</span></div></header>
+              <form id="moneyForm" class="money-form">
+                <label class="field">
+                  <span>Monthly after-tax income</span>
+                  <input type="number" id="moneyIncome" min="0" step="any" inputmode="decimal" placeholder="e.g. 5000">
+                </label>
+                <label class="field field-sm">
+                  <span>Currency symbol</span>
+                  <input type="text" id="moneyCurrency" maxlength="4" placeholder="$">
+                </label>
+                <button type="submit">Save</button>
+                <span class="form-status" id="moneyStatus" role="status"></span>
+              </form>
+            </div>
+
+            <div class="card">
+              <header class="card-head"><div class="card-title"><span>Budget split: the 50/30/20 rule</span></div></header>
+              <div id="moneyAllocation" class="money-allocation"></div>
+            </div>
+
+            <div class="card">
+              <header class="card-head"><div class="card-title"><span>Sinking fund calculator</span></div></header>
+              <div class="money-form">
+                <label class="field">
+                  <span>Target amount</span>
+                  <input type="number" id="sfTarget" min="0" step="any" inputmode="decimal" placeholder="e.g. 1200">
+                </label>
+                <label class="field field-sm">
+                  <span>Months to save</span>
+                  <input type="number" id="sfMonths" min="1" step="1" inputmode="numeric" placeholder="e.g. 6">
+                </label>
+              </div>
+              <p class="sf-result" id="sfResult" aria-live="polite"></p>
+            </div>
+
+            <div class="card">
+              <header class="card-head"><div class="card-title"><span>Core financial concepts</span></div></header>
+              <details class="concept">
+                <summary>The 50/30/20 rule</summary>
+                <p class="item-meta">A simple budgeting framework for your after-tax income.</p>
+                <p>Put 50% toward needs (housing, utilities, groceries), 30% toward wants (eating out, hobbies, entertainment) and 20% toward savings and debt repayment. It gives you a clear path to financial health without tracking every penny.</p>
+              </details>
+              <details class="concept">
+                <summary>Pay yourself first</summary>
+                <p class="item-meta">The most powerful habit for building wealth.</p>
+                <p>Before you pay bills or spend on anything else, set aside part of your income for savings. Automating the transfer to a separate account makes it effortless, and it counters present bias — our tendency to favour immediate rewards over long-term ones.</p>
+              </details>
+              <details class="concept">
+                <summary>Sinking funds</summary>
+                <p class="item-meta">Save for big, predictable expenses without the stress.</p>
+                <p>A sinking fund is a small, regular saving for a specific future purchase, such as a car, a holiday or gifts. Breaking a large cost into small monthly amounts helps you avoid debt and the shock of a big one-off expense.</p>
+              </details>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
   </div>
-
-  <main>
-    <section id="today" class="tab-panel active">
-      <div id="todayContent"></div>
-    </section>
-
-    <section id="dashboard" class="tab-panel">
-      <div class="card-grid" id="dashboardGrid"></div>
-
-      <section class="activity-section">
-        <h2 class="section-heading">🔥 Streak &amp; Activity</h2>
-        <div class="card-grid" id="streakGrid"></div>
-
-        <div class="heatmap-wrap">
-          <div class="heatmap-row">
-            <div class="heatmap-daylabels">
-              <span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>
-            </div>
-            <div class="heatmap-scroll">
-              <div class="heatmap-months" id="activityMonths"></div>
-              <div class="heatmap" id="activityHeatmap"></div>
-            </div>
-          </div>
-          <div class="heatmap-legend">
-            <span>Less</span>
-            <span class="heat-swatch heat-0"></span>
-            <span class="heat-swatch heat-1"></span>
-            <span class="heat-swatch heat-2"></span>
-            <span class="heat-swatch heat-3"></span>
-            <span class="heat-swatch heat-4"></span>
-            <span>More</span>
-          </div>
-        </div>
-      </section>
-
-      <div class="backup-card" id="backupCard">
-        <div class="backup-info">
-          <div class="backup-title">Backup</div>
-          <div class="backup-status" id="backupStatus"></div>
-        </div>
-        <div class="backup-actions">
-          <button type="button" id="exportBtn">Export backup</button>
-          <label class="file-btn">
-            Import backup
-            <input type="file" id="importFile" accept="application/json">
-          </label>
-        </div>
-      </div>
-
-      <div class="import-confirm" id="importConfirm">
-        <p id="importSummary"></p>
-        <div class="import-confirm-actions">
-          <button type="button" id="importCancelBtn" class="secondary-btn">Cancel</button>
-          <button type="button" id="importConfirmBtn">Replace my data</button>
-        </div>
-      </div>
-    </section>
-
-    <section id="habits" class="tab-panel">
-      <form id="habitForm" class="inline-form">
-        <input type="text" id="habitInput" placeholder="New habit, e.g. Drink water" required>
-        <select id="habitArea" class="area-select" aria-label="Life area"></select>
-        <button type="submit">Add Habit</button>
-      </form>
-      <ul class="item-list" id="habitList"></ul>
-    </section>
-
-    <section id="journal" class="tab-panel">
-      <form id="journalForm" class="stacked-form">
-        <div class="mood-picker" id="moodPicker" role="radiogroup" aria-label="Mood">
-          <button type="button" class="mood-btn" data-mood="😄" role="radio" aria-checked="false">😄</button>
-          <button type="button" class="mood-btn selected" data-mood="🙂" role="radio" aria-checked="true">🙂</button>
-          <button type="button" class="mood-btn" data-mood="😐" role="radio" aria-checked="false">😐</button>
-          <button type="button" class="mood-btn" data-mood="🙁" role="radio" aria-checked="false">🙁</button>
-          <button type="button" class="mood-btn" data-mood="😢" role="radio" aria-checked="false">😢</button>
-        </div>
-        <textarea id="journalInput" placeholder="What's on your mind today?" rows="3" required></textarea>
-        <button type="submit">Add Entry</button>
-      </form>
-      <ul class="item-list" id="journalList"></ul>
-    </section>
-
-    <section id="goals" class="tab-panel">
-      <form id="goalForm" class="inline-form">
-        <input type="text" id="goalInput" placeholder="New goal, e.g. Run a 5k" required>
-        <input type="date" id="goalDate">
-        <button type="submit">Add Goal</button>
-      </form>
-      <ul class="item-list" id="goalList"></ul>
-    </section>
-
-    <section id="wheel" class="tab-panel">
-      <p class="wheel-intro">
-        Each area is scored 0–10 from how often you did its habits in the last 30 days.
-        Areas with no habits use the slider instead. Tag habits with an area on the Habits tab.
-      </p>
-      <div class="wheel-chart" id="wheelChart"></div>
-      <ul class="item-list" id="wheelList"></ul>
-    </section>
-
-    <section id="tasks" class="tab-panel">
-      <div class="google-card" id="googleCard">
-        <div class="google-header">
-          <div>
-            <div class="google-title">Google Calendar</div>
-            <div class="google-status" id="googleStatus">Not connected.</div>
-          </div>
-          <div class="google-actions">
-            <button type="button" id="googleConnectBtn">Connect</button>
-            <button type="button" id="googleSyncBtn" class="secondary-btn" hidden>Sync now</button>
-            <button type="button" id="googleDisconnectBtn" class="secondary-btn" hidden>Disconnect</button>
-          </div>
-        </div>
-        <details class="google-setup">
-          <summary>Google Client ID setup</summary>
-          <p>
-            Tasks with a due date can create matching events on your Google Calendar.
-            You'll need an OAuth Client ID from your own Google Cloud project
-            (it's not a secret — safe to store here). Ask for setup steps if you
-            haven't made one yet.
-          </p>
-          <div class="inline-form">
-            <input type="text" id="googleClientIdInput" placeholder="xxxxx.apps.googleusercontent.com">
-            <button type="button" id="googleClientIdSaveBtn">Save</button>
-          </div>
-        </details>
-      </div>
-
-      <div class="google-card" id="icsCard">
-        <div class="google-header">
-          <div>
-            <div class="google-title">Import / export calendar (.ics)</div>
-            <div class="google-status">Works with any calendar app — Google, Apple, Outlook, or a forwarded invite.</div>
-          </div>
-          <div class="google-actions">
-            <button type="button" id="icsExportBtn" class="secondary-btn">Export .ics</button>
-            <label class="file-btn">
-              Import .ics
-              <input type="file" id="icsImportFile" accept=".ics,text/calendar">
-            </label>
-          </div>
-        </div>
-        <div class="import-confirm" id="icsImportConfirm">
-          <p id="icsImportSummary"></p>
-          <div class="import-confirm-actions">
-            <button type="button" id="icsImportCancelBtn" class="secondary-btn">Cancel</button>
-            <button type="button" id="icsImportConfirmBtn">Add as tasks</button>
-          </div>
-        </div>
-      </div>
-
-      <form id="taskForm" class="inline-form">
-        <input type="text" id="taskInput" placeholder="New task, e.g. Renew passport" required>
-        <input type="date" id="taskDate">
-        <select id="taskPriority" aria-label="Priority">
-          <option value="high">High priority</option>
-          <option value="medium" selected>Medium priority</option>
-          <option value="low">Low priority</option>
-        </select>
-        <select id="taskRepeat" aria-label="Repeat">
-          <option value="">Does not repeat</option>
-          <option value="daily">Repeats daily</option>
-          <option value="weekly">Repeats weekly</option>
-          <option value="monthly">Repeats monthly</option>
-        </select>
-        <select id="taskGoal" aria-label="Goal">
-          <option value="">No goal</option>
-        </select>
-        <button type="submit">Add Task</button>
-      </form>
-
-      <div class="view-toggle" id="taskViewToggle" role="group" aria-label="Task view">
-        <button type="button" class="view-toggle-btn" data-view="list">List</button>
-        <button type="button" class="view-toggle-btn" data-view="board">Board</button>
-      </div>
-
-      <ul class="item-list" id="taskList"></ul>
-      <div class="board" id="taskBoard" hidden></div>
-    </section>
-
-    <section id="calendar" class="tab-panel">
-      <div class="google-card" id="calendarToolbar">
-        <div class="google-header">
-          <div>
-            <div class="google-title" id="calendarMonthLabel"></div>
-            <div class="google-status">Tasks and goals due this month.</div>
-          </div>
-          <div class="google-actions">
-            <button type="button" id="calendarPrevBtn" class="secondary-btn">‹ Prev</button>
-            <button type="button" id="calendarTodayBtn" class="secondary-btn">Today</button>
-            <button type="button" id="calendarNextBtn" class="secondary-btn">Next ›</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="calendar-daylabels">
-        <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
-      </div>
-      <div class="calendar-grid" id="calendarGrid"></div>
-
-      <div class="calendar-day-detail" id="calendarDayDetail" hidden>
-        <h3 id="calendarDayDetailTitle"></h3>
-        <ul class="item-list" id="calendarDayDetailList"></ul>
-      </div>
-    </section>
-  </main>
 
   <div class="toast" id="toast">
     <span class="toast-message"></span>

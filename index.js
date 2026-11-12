@@ -2,6 +2,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const ai = require('./ai');
 
 const port = process.env.PORT || 1337;
 
@@ -23,6 +24,7 @@ const server = http.createServer((req, res) => {
         res.writeHead(400);
         return res.end('400 Bad Request');
     }
+    if (pathname.startsWith('/api/ai/')) return ai.handle(req, res, pathname);
     if (pathname === '/') pathname = '/index.html';
 
     // Resolve inside public/ and refuse anything that escapes it.
