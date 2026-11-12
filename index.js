@@ -20,7 +20,7 @@ const mimeTypes = {
 
 // What a signed-out visitor may load when login is on. Everything else (the
 // app itself and /api/ai) needs a session.
-const PUBLIC_FILES = new Set(['/login.html', '/login.js', '/style.css']);
+const PUBLIC_FILES = new Set(['/login.html', '/login.js', '/style.css', '/background.js']);
 
 function redirect(res, location) {
     res.writeHead(302, { Location: location, 'Cache-Control': 'no-store' });

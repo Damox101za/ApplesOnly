@@ -33,6 +33,10 @@ served by a small dependency-free Node.js server.
   automatic schema migrations.
 - **Light and dark themes** — follows your system, or use the toggle in the
   header.
+- **Animated background** — a soft, slowly moving banner at the top of every page
+  and on the sign-in screen. Turn it off with the sparkle button in the header
+  (your choice is remembered). It stays still if your system asks for reduced
+  motion.
 
 Data is stored locally in the browser (`localStorage`) — no database.
 

@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
   projects: 'lifeTracker.projects',
   money: 'lifeTracker.money',
   theme: 'lifeTracker.theme',
+  background: 'lifeTracker.background',
 };
 
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
@@ -177,6 +178,10 @@ function loadAndMigrate() {
 let { habits, journal, goals, tasks, projects } = loadAndMigrate();
 let money = load(STORAGE_KEYS.money, {});
 
+// Set once everything is defined; the page banner reads data declared further down.
+let appReady = false;
+let todayBanner = { title: '', sub: '' };
+
 // ---------- Icons ----------
 // Small stroke icons (24px grid), inlined so there are no extra requests.
 const ICON_PATHS = {
@@ -228,6 +233,7 @@ function showTab(tab) {
   document.getElementById('pageIcon').innerHTML = icon(btn.dataset.icon);
   const main = document.getElementById('main');
   if (main) main.scrollTo(0, 0);
+  if (appReady) renderBanner();
 }
 
 document.getElementById('tabs').innerHTML = NAV.map(
@@ -2577,6 +2583,7 @@ function renderCalendar() {
   });
 
   renderCalendarDayDetail(calendarSelectedDay);
+  renderBanner();
 }
 
 function renderCalendarDayDetail(dateKey) {
@@ -2742,9 +2749,8 @@ function renderToday() {
   }
   const empty = !overdue.length && !dueToday.length && !habitStates.length;
 
-  // The hero lives outside todayContent so its canvas survives re-renders.
-  document.getElementById('heroTitle').textContent = greeting;
-  document.getElementById('heroSub').innerHTML = `${escapeHtml(dateLabel)} · ${sentence}`;
+  // The banner lives outside todayContent so its canvas survives re-renders.
+  todayBanner = { title: greeting, sub: `${escapeHtml(dateLabel)} · ${sentence}` };
 
   root.innerHTML = `
     <div class="kpi-strip">
@@ -2886,6 +2892,7 @@ function renderDashboard() {
     const d = Math.floor(daysSince);
     backupStatus.textContent = d === 0 ? 'Backed up today.' : `Last backed up ${d} day${d === 1 ? '' : 's'} ago.`;
   }
+  renderBanner();
 }
 
 // ---------- Life Wheel ----------
@@ -3025,6 +3032,7 @@ document.getElementById('wheelList').addEventListener('input', (e) => {
   // Update chart + number live without rebuilding the slider mid-drag.
   document.getElementById('wheelChart').innerHTML = wheelSVG(wheelScores());
   slider.closest('.wheel-row').querySelector('.wheel-score').textContent = slider.value;
+  renderBanner();
 });
 document.getElementById('wheelList').addEventListener('change', (e) => {
   if (e.target.closest('[data-rate]')) save(STORAGE_KEYS.wheelRatings, wheelRatings);
@@ -3075,6 +3083,7 @@ function renderMoney() {
       ).join('')
     : '<p class="empty-state">Enter your monthly after-tax income above to see your split.</p>';
   renderSinkingFund();
+  renderBanner();
 }
 
 function renderSinkingFund() {
@@ -3346,6 +3355,92 @@ document.getElementById('summaryBtn').addEventListener('click', (e) => {
   });
 });
 
+// ---------- Page banner ----------
+// One banner (and one canvas) sits above every tab. Its headline is friendlier
+// than the tab name, and the line under it is a live summary of that tab.
+function bannerFor(tab) {
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const today = todayKey();
+  switch (tab) {
+    case 'today':
+      return todayBanner;
+    case 'tasks': {
+      const open = tasks.filter((t) => t.status !== 'done');
+      const overdue = open.filter((t) => t.dueDate && t.dueDate < today).length;
+      return { title: 'Get it done', sub: `${open.length} open · ${overdue} overdue · ${tasks.length - open.length} done` };
+    }
+    case 'calendar': {
+      const prefix = localDateKey(calendarViewDate).slice(0, 7);
+      const due = tasks.filter((t) => t.dueDate && t.dueDate.startsWith(prefix)).length + goals.filter((g) => g.dueDate && g.dueDate.startsWith(prefix)).length;
+      return {
+        title: calendarViewDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+        sub: due ? `${plural(due, 'thing')} due this month` : 'Nothing due this month',
+      };
+    }
+    case 'habits': {
+      const due = habits.filter(habitDueToday);
+      const done = due.filter((h) => h.log.includes(today)).length;
+      return { title: 'Keep the chain going', sub: due.length ? `${done} of ${due.length} done today` : 'No habits scheduled today' };
+    }
+    case 'journal': {
+      const latest = journal.length ? [...journal].sort((a, b) => b.createdAt - a.createdAt)[0].mood : '';
+      return { title: 'How are you feeling?', sub: journal.length ? `${plural(journal.length, 'entry').replace('entrys', 'entries')} · latest mood ${escapeHtml(latest)}` : 'Write your first entry' };
+    }
+    case 'goals': {
+      const active = goals.filter((g) => goalProgress(g).pct < 100).length;
+      return { title: "Where you're headed", sub: goals.length ? `${active} active · ${goals.length - active} completed` : 'Add a goal to get started' };
+    }
+    case 'projects': {
+      const linked = tasks.filter((t) => projects.some((p) => p.id === taskProjectId(t))).length;
+      return { title: 'Big things, in pieces', sub: projects.length ? `${plural(projects.length, 'project')} · ${plural(linked, 'linked task')}` : 'Group goals and tasks into projects' };
+    }
+    case 'dashboard': {
+      const stats = activityStreaks(activityCounts());
+      return { title: 'Your progress', sub: `Current streak: ${plural(stats.current, 'day')} · ${plural(stats.totalEvents, 'check-in')}` };
+    }
+    case 'wheel': {
+      const scores = wheelScores();
+      const avg = scores.reduce((sum, s) => sum + s.score, 0) / scores.length;
+      return { title: 'Balance check', sub: `Average ${avg.toFixed(1)} out of 10 across ${scores.length} areas` };
+    }
+    case 'money':
+      return {
+        title: 'Your money',
+        sub: moneyIncome() ? `Monthly income ${escapeHtml(fmtMoney(moneyIncome()))} · ${escapeHtml(fmtMoney(moneyIncome() * 0.2))} to save` : 'Add your income to see your split',
+      };
+    default:
+      return { title: '', sub: '' };
+  }
+}
+
+function renderBanner() {
+  const active = document.querySelector('.tab-btn.active');
+  if (!active) return;
+  const { title, sub } = bannerFor(active.dataset.tab);
+  document.getElementById('heroTitle').textContent = title;
+  document.getElementById('heroSub').innerHTML = sub;
+}
+
+// ---------- Animated background on/off ----------
+const bgToggle = document.getElementById('bgToggle');
+
+function applyBackground(on) {
+  if (on) delete document.documentElement.dataset.bg;
+  else document.documentElement.dataset.bg = 'off';
+  const label = on ? 'Turn the animated background off' : 'Turn the animated background on';
+  bgToggle.setAttribute('aria-pressed', String(on));
+  bgToggle.setAttribute('aria-label', label);
+  bgToggle.title = label;
+  bgToggle.innerHTML = icon('sparkles');
+  if (window.AnimatedBackground) AnimatedBackground.setEnabled(on);
+}
+
+bgToggle.addEventListener('click', () => {
+  const on = document.documentElement.dataset.bg === 'off'; // flip
+  applyBackground(on);
+  save(STORAGE_KEYS.background, on ? 'on' : 'off');
+});
+
 // ---------- Account (shown only when the server has Google sign-in on) ----------
 const accountEl = document.getElementById('account');
 const accountBtn = document.getElementById('accountBtn');
@@ -3422,6 +3517,7 @@ function escapeHtml(str) {
 }
 
 applyTheme(load(STORAGE_KEYS.theme, null));
+applyBackground(load(STORAGE_KEYS.background, 'on') !== 'off');
 if (window.AnimatedBackground) AnimatedBackground.mount(document.getElementById('heroCanvas'));
 renderHabits();
 renderJournal();
@@ -3430,5 +3526,7 @@ renderTasksView();
 renderProjects();
 renderMoney();
 renderDashboard();
+appReady = true;
+renderBanner();
 detectAI();
 initAccount();

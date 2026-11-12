@@ -91,5 +91,8 @@ async function startLogin() {
   });
 }
 
+// It covers the whole screen, so draw it small and at a gentler frame rate.
+if (window.AnimatedBackground) AnimatedBackground.mount(document.getElementById('loginCanvas'), { scale: 0.2, fps: 24 });
+
 loginRetry.addEventListener('click', startLogin);
 startLogin();

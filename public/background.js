@@ -2,8 +2,9 @@
 // Animated "painted" background: slow, domain-warped noise in a few theme
 // colours, drawn by a tiny WebGL shader. No dependencies.
 //
-// Usage: AnimatedBackground.mount(canvas). The canvas should fill a
-// positioned parent. Colours come from the CSS variables --hero-a/-b/-c on
+// Usage: AnimatedBackground.mount(canvas, { scale, fps }). The canvas should
+// fill a positioned parent. AnimatedBackground.setEnabled(false) switches every
+// instance off (and back on) without a reload. Colours come from the CSS variables --hero-a/-b/-c on
 // that parent, so the light/dark themes restyle it automatically.
 //
 // It stays cheap: it renders at half resolution (the image is soft anyway),
@@ -73,8 +74,12 @@ void main() {
 }`;
 
   const STILL_TIME = 14.0; // a pleasant frame for reduced motion / paused states
-  const FPS = 30;
-  const SCALE = 0.5;
+  const DEFAULT_FPS = 30;
+  const DEFAULT_SCALE = 0.5;
+
+  // Global switch, shared by every instance. <html data-bg="off"> means off.
+  let enabled = document.documentElement.dataset.bg !== 'off';
+  const instances = [];
 
   function parseColor(css, fallback) {
     let m = /rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)/.exec(css);
@@ -115,7 +120,9 @@ void main() {
     return shader;
   }
 
-  function mount(canvas) {
+  function mount(canvas, options = {}) {
+    const SCALE = options.scale || DEFAULT_SCALE;
+    const FPS = options.fps || DEFAULT_FPS;
     const host = canvas.parentElement;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -127,10 +134,11 @@ void main() {
     let rafId = 0;
     let lastFrame = 0;
     let visible = true;
+    let active = enabled;
+    let ready = false;
 
     function fallBack() {
       host.classList.add('hero-static');
-      return null;
     }
 
     function setup() {
@@ -175,6 +183,17 @@ void main() {
       return true;
     }
 
+    // The GL context is only created once the background is actually wanted.
+    function init() {
+      if (ready) return true;
+      if (!setup()) {
+        fallBack();
+        return false;
+      }
+      ready = true;
+      return true;
+    }
+
     function resize() {
       const rect = host.getBoundingClientRect();
       const w = Math.max(1, Math.round(rect.width * SCALE));
@@ -186,7 +205,7 @@ void main() {
     }
 
     function draw(seconds) {
-      if (!gl || gl.isContextLost()) return;
+      if (!active || !ready || gl.isContextLost()) return;
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.uniform2f(uniforms.res, canvas.width, canvas.height);
       gl.uniform1f(uniforms.time, seconds);
@@ -204,42 +223,60 @@ void main() {
       draw(now / 1000);
     }
 
+    function stopLoop() {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+
     // Run only while it can actually be seen and motion is welcome.
     function sync() {
+      if (!active || !ready) {
+        stopLoop();
+        return;
+      }
       if (visible) resize(); // the host may have been hidden (0x0) or resized meanwhile
       const shouldRun = visible && !document.hidden && !reduceMotion.matches;
       if (shouldRun && !rafId) {
         rafId = requestAnimationFrame(frame);
       } else if (!shouldRun) {
-        if (rafId) cancelAnimationFrame(rafId);
-        rafId = 0;
+        stopLoop();
         draw(STILL_TIME);
       }
     }
 
     function refreshColors() {
+      if (!active || !ready) return;
       palette = readPalette(host);
       if (!rafId) draw(STILL_TIME);
     }
 
-    if (!setup()) return fallBack();
+    function enable() {
+      active = true;
+      if (!init()) return;
+      resize();
+      draw(STILL_TIME);
+      sync();
+    }
+
+    function disable() {
+      active = false;
+      stopLoop();
+    }
 
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = 0;
+      stopLoop();
     });
     canvas.addEventListener('webglcontextrestored', () => {
-      if (setup()) {
+      ready = false;
+      if (active && init()) {
         resize();
         sync();
-      } else {
-        fallBack();
       }
     });
 
-    resize();
     new ResizeObserver(() => {
+      if (!active || !ready) return;
       resize();
       if (!rafId) draw(STILL_TIME);
     }).observe(host);
@@ -248,6 +285,7 @@ void main() {
       sync();
     }).observe(host);
     window.addEventListener('resize', () => {
+      if (!active || !ready) return;
       resize();
       if (!rafId) draw(STILL_TIME);
     });
@@ -261,10 +299,20 @@ void main() {
     });
     darkQuery.addEventListener('change', refreshColors);
 
-    draw(STILL_TIME);
-    sync();
-    return { canvas };
+    const handle = { canvas, enable, disable };
+    instances.push(handle);
+    if (active && init()) {
+      resize();
+      draw(STILL_TIME);
+      sync();
+    }
+    return handle;
   }
 
-  window.AnimatedBackground = { mount };
+  function setEnabled(on) {
+    enabled = Boolean(on);
+    instances.forEach((i) => (enabled ? i.enable() : i.disable()));
+  }
+
+  window.AnimatedBackground = { mount, setEnabled };
 })();

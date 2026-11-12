@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign in · Life Tracker</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%8D%8E%3C/text%3E%3C/svg%3E">
-  <script>try{var t=JSON.parse(localStorage.getItem('lifeTracker.theme'));if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;}catch(e){}</script>
+  <script>try{var t=JSON.parse(localStorage.getItem('lifeTracker.theme'));if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;if(JSON.parse(localStorage.getItem('lifeTracker.background'))==='off')document.documentElement.dataset.bg='off';}catch(e){}</script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="login-page">
-  <div class="login-bg" aria-hidden="true"></div>
+  <div class="login-bg" aria-hidden="true">
+    <canvas class="hero-canvas" id="loginCanvas"></canvas>
+  </div>
 
   <main class="card login-card" id="main">
     <div class="brand login-brand">
@@ -33,6 +35,7 @@
   </main>
 
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="background.js"></script>
   <script src="login.js"></script>
 </body>
 </html>

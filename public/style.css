@@ -888,8 +888,9 @@ button:disabled {
   position: relative;
   isolation: isolate;
   overflow: hidden;
+  max-width: 64rem;
   min-height: 7.5rem;
-  margin-bottom: 1.25rem;
+  margin: 0 auto 1.25rem;
   padding: 1.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -909,7 +910,7 @@ button:disabled {
   height: 100%;
 }
 
-.hero.hero-static .hero-canvas {
+.hero-static .hero-canvas {
   display: none;
 }
 
@@ -2219,4 +2220,31 @@ textarea.edit-input {
 
 .account-menu .secondary-btn {
   width: 100%;
+}
+
+/* ---------- Animated background: off switch ---------- */
+html[data-bg="off"] .hero {
+  background: var(--card);
+}
+
+html[data-bg="off"] .hero-canvas {
+  display: none;
+}
+
+html[data-bg="off"] .login-bg {
+  background: var(--background);
+}
+
+#bgToggle[aria-pressed="false"] {
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 767px) {
+  .hero {
+    min-height: 5.5rem;
+    padding: 1.1rem;
+  }
+  .hero-title {
+    font-size: 1.25rem;
+  }
 }
