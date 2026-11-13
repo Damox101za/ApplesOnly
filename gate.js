@@ -17,7 +17,7 @@ const auth = require('./auth');
 // The manifest and icons are included because browsers fetch the manifest
 // without cookies, so it has to load even for a signed-in visitor.
 const PUBLIC_FILES = new Set([
-  '/login.html', '/login.js', '/firebase-client.js', '/style.css', '/background.js', '/favicon.ico',
+  '/login.html', '/login.js', '/firebase-client.js', '/style.css', '/background.js', '/theme-init.js', '/favicon.ico',
   '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png',
   '/icons/maskable-512.png', '/icons/apple-touch-icon.png',
 ]);

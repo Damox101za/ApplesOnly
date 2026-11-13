@@ -2281,7 +2281,71 @@ function daysSinceLastBackup() {
   return (Date.now() - last) / (1000 * 60 * 60 * 24);
 }
 
-function exportBackup() {
+// ---------- Password-protected backups ----------
+// Done entirely in the browser: the password never leaves this device. The key
+// comes from the password via PBKDF2 (SHA-256, many rounds, so guessing is slow),
+// and the data is sealed with AES-GCM, which also detects any tampering.
+const PROTECTED_BACKUP_FORMAT = 'lifetracker-protected-backup';
+const BACKUP_KDF_ITERATIONS = 600000;
+const MIN_BACKUP_PASSWORD = 8;
+const canProtectBackups = Boolean(window.crypto && crypto.subtle && window.isSecureContext);
+
+function bytesToBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+function base64ToBytes(str) {
+  const bin = atob(str);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function backupKey(password, salt, iterations) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    base,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+async function protectBackup(json, password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await backupKey(password, salt, BACKUP_KDF_ITERATIONS);
+  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(json)));
+  return JSON.stringify({
+    format: PROTECTED_BACKUP_FORMAT,
+    version: 1,
+    kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: BACKUP_KDF_ITERATIONS, salt: bytesToBase64(salt) },
+    cipher: { name: 'AES-GCM', iv: bytesToBase64(iv) },
+    data: bytesToBase64(sealed),
+  }, null, 2);
+}
+
+async function unprotectBackup(file, password) {
+  const iterations = Number(file.kdf && file.kdf.iterations);
+  if (!Number.isInteger(iterations) || iterations < 1000 || iterations > 10000000) throw new Error('This backup file is damaged.');
+  const key = await backupKey(password, base64ToBytes(file.kdf.salt), iterations);
+  let plain;
+  try {
+    plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToBytes(file.cipher.iv) }, key, base64ToBytes(file.data));
+  } catch {
+    throw new Error('That password is not right (or the file has been changed).');
+  }
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+function isProtectedBackup(data) {
+  return Boolean(data && data.format === PROTECTED_BACKUP_FORMAT && data.kdf && data.cipher && typeof data.data === 'string');
+}
+
+async function exportBackup(password = '') {
   const payload = {
     schemaVersion: SCHEMA_VERSION,
     exportedAt: Date.now(),
@@ -2293,12 +2357,14 @@ function exportBackup() {
     money,
     wheelRatings,
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const json = JSON.stringify(payload, null, 2);
+  const body = password ? await protectBackup(json, password) : json;
+  const blob = new Blob([body], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   const stamp = todayKey();
   a.href = url;
-  a.download = `apples-only-backup-${stamp}.json`;
+  a.download = `apples-only-backup-${stamp}${password ? '-protected' : ''}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -2320,6 +2386,44 @@ function isValidBackup(data) {
 }
 
 let pendingImport = null;
+let pendingProtected = null; // a password-protected file waiting for its password
+let pendingImportDone = 'Backup imported.';
+
+function contentsText(data) {
+  const n = (v) => (Array.isArray(v) ? v.length : 0);
+  const journalCount = n(data.journal);
+  return (
+    `${n(data.habits)} habit(s), ${journalCount} journal entr${journalCount === 1 ? 'y' : 'ies'}, ` +
+    `${n(data.goals)} goal(s), ${n(data.tasks)} task(s), and ${n(data.projects)} project(s)`
+  );
+}
+
+// Shows the "replace my data?" step for a backup file or an earlier version.
+function askToReplace(data, { intro, button, done }) {
+  pendingImport = data;
+  pendingImportDone = done;
+  const keepsVersion = window.CloudSync && CloudSync.isEnabled();
+  document.getElementById('importSummary').textContent =
+    `${intro} ${contentsText(data)}. This replaces your current data` +
+    (keepsVersion ? '; your current data is kept under Earlier versions, so you can switch back.' : '. You can Undo straight afterwards.') +
+    ' Continue?';
+  document.getElementById('importConfirmBtn').textContent = button;
+  const box = document.getElementById('importConfirm');
+  box.classList.add('visible');
+  box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function acceptBackupData(data) {
+  if (!isValidBackup(data)) {
+    showWarning('That file doesn’t look like an ApplesOnly backup.');
+    return;
+  }
+  askToReplace(data, {
+    intro: `This backup${data.exportedAt ? ` from ${new Date(data.exportedAt).toLocaleString()}` : ''} has`,
+    button: 'Replace my data',
+    done: 'Backup imported.',
+  });
+}
 
 function handleImportFile(file) {
   const reader = new FileReader();
@@ -2331,25 +2435,86 @@ function handleImportFile(file) {
       showWarning('That file isn’t valid JSON.');
       return;
     }
-    if (!isValidBackup(data)) {
-      showWarning('That file doesn’t look like an ApplesOnly backup.');
+    if (isProtectedBackup(data)) {
+      if (!canProtectBackups) {
+        showWarning('This browser can’t open password-protected backups here. Use the app over https.');
+        return;
+      }
+      pendingProtected = data;
+      document.getElementById('importPasswordError').textContent = '';
+      document.getElementById('importPassword').value = '';
+      document.getElementById('importPasswordPanel').classList.add('visible');
+      document.getElementById('importPassword').focus();
       return;
     }
-    pendingImport = data;
-    const summary = document.getElementById('importSummary');
-    const taskCount = Array.isArray(data.tasks) ? data.tasks.length : 0;
-    summary.textContent =
-      `This file has ${data.habits.length} habit(s), ${data.journal.length} journal entr${data.journal.length === 1 ? 'y' : 'ies'}, ` +
-      `${data.goals.length} goal(s), ${taskCount} task(s), and ${Array.isArray(data.projects) ? data.projects.length : 0} project(s)` +
-      (data.exportedAt ? `, exported ${new Date(data.exportedAt).toLocaleString()}` : '') +
-      '. Importing will replace your current data. Continue?';
-    document.getElementById('importConfirm').classList.add('visible');
+    acceptBackupData(data);
   };
   reader.readAsText(file);
 }
 
+function closeImportPassword() {
+  pendingProtected = null;
+  document.getElementById('importPassword').value = '';
+  document.getElementById('importPasswordPanel').classList.remove('visible');
+  document.getElementById('importFile').value = '';
+}
+
+document.getElementById('importPasswordPanel').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!pendingProtected) return;
+  const btn = document.getElementById('importPasswordBtn');
+  const err = document.getElementById('importPasswordError');
+  btn.disabled = true;
+  btn.textContent = 'Unlocking…';
+  try {
+    const data = await unprotectBackup(pendingProtected, document.getElementById('importPassword').value);
+    closeImportPassword();
+    acceptBackupData(data);
+  } catch (error) {
+    err.textContent = error.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Unlock';
+  }
+});
+document.getElementById('importPasswordCancelBtn').addEventListener('click', closeImportPassword);
+
+// ---------- Export panel (optional password) ----------
+const exportPanel = document.getElementById('exportPanel');
+
+function closeExportPanel() {
+  exportPanel.classList.remove('visible');
+  document.getElementById('exportPassword').value = '';
+  document.getElementById('exportPassword2').value = '';
+  document.getElementById('exportError').textContent = '';
+}
+
+exportPanel.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pw = document.getElementById('exportPassword').value;
+  const pw2 = document.getElementById('exportPassword2').value;
+  const err = document.getElementById('exportError');
+  if (pw || pw2) {
+    if (pw.length < MIN_BACKUP_PASSWORD) return (err.textContent = `Use at least ${MIN_BACKUP_PASSWORD} characters.`);
+    if (pw !== pw2) return (err.textContent = 'The two passwords don’t match.');
+  }
+  const btn = document.getElementById('exportGoBtn');
+  btn.disabled = true;
+  try {
+    await exportBackup(pw);
+    closeExportPanel();
+  } catch {
+    err.textContent = 'Couldn’t create the backup. Please try again.';
+  } finally {
+    btn.disabled = false;
+  }
+});
+document.getElementById('exportCancelBtn').addEventListener('click', closeExportPanel);
+
 function confirmImport() {
   if (!pendingImport) return;
+  // Have the account keep what it has now as an earlier version first.
+  if (window.CloudSync && CloudSync.isEnabled()) CloudSync.keepVersionBeforeNextSave();
   const previous = { habits, journal, goals, tasks, projects, money };
   const migrated = migrate({
     habits: pendingImport.habits,
@@ -2382,7 +2547,7 @@ function confirmImport() {
   renderMoney();
   renderDashboard();
   cancelImport();
-  showToast('Backup imported.', () => {
+  showToast(pendingImportDone, () => {
     habits = previous.habits;
     journal = previous.journal;
     goals = previous.goals;
@@ -2410,7 +2575,89 @@ function cancelImport() {
   document.getElementById('importFile').value = '';
 }
 
-document.getElementById('exportBtn').addEventListener('click', exportBackup);
+document.getElementById('exportBtn').addEventListener('click', () => {
+  if (!canProtectBackups) return exportBackup(); // no Web Crypto here (plain http): plain file only
+  closeImportPassword();
+  exportPanel.classList.add('visible');
+  document.getElementById('exportPassword').focus();
+});
+
+// ---------- Earlier versions (kept by the account) ----------
+const versionsCard = document.getElementById('versionsCard');
+const versionsBtn = document.getElementById('versionsBtn');
+const versionList = document.getElementById('versionList');
+
+function versionWhatText(counts) {
+  const parts = [
+    [counts.tasks, 'task'],
+    [counts.habits, 'habit'],
+    [counts.goals, 'goal'],
+    [counts.projects, 'project'],
+    [counts.journal, 'journal entry'],
+  ]
+    .filter(([n]) => n)
+    .map(([n, word]) => `${n} ${n === 1 ? word : word.replace(/y$/, 'ie') + 's'}`);
+  return parts.join(' · ') || 'Empty';
+}
+
+async function showVersions() {
+  versionList.hidden = false;
+  versionsBtn.setAttribute('aria-expanded', 'true');
+  versionsBtn.textContent = 'Hide';
+  versionList.innerHTML = '<li class="version-empty">Loading…</li>';
+  try {
+    const { versions, keep, gapHours } = await CloudSync.listVersions();
+    document.getElementById('versionsHint').textContent =
+      `Before your data changes, your account keeps a copy: at most one every ${gapHours} hours, and the last ${keep}. ` +
+      'Restoring or importing always keeps one first.';
+    versionList.innerHTML = versions.length
+      ? versions
+          .map(
+            (v) => `<li>
+              <div><div class="version-when">${escapeHtml(new Date(v.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }))}</div>
+              <div class="version-what">${escapeHtml(versionWhatText(v.counts))}</div></div>
+              <button type="button" class="secondary-btn" data-version="${escapeHtml(String(v.at))}">Restore</button>
+            </li>`
+          )
+          .join('')
+      : '<li class="version-empty">No earlier versions yet. They appear once your data has changed.</li>';
+  } catch (err) {
+    versionList.innerHTML = `<li class="version-empty">${escapeHtml(err.message)}</li>`;
+  }
+}
+
+function hideVersions() {
+  versionList.hidden = true;
+  versionsBtn.setAttribute('aria-expanded', 'false');
+  versionsBtn.textContent = 'Show';
+}
+
+versionsBtn.addEventListener('click', () => (versionList.hidden ? showVersions() : hideVersions()));
+versionList.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-version]');
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    const v = await CloudSync.getVersion(btn.dataset.version);
+    const data = v.data || {};
+    // A version only holds what existed then; fill in empty lists so it imports cleanly.
+    ['habits', 'journal', 'goals', 'tasks', 'projects'].forEach((k) => {
+      if (!Array.isArray(data[k])) data[k] = [];
+    });
+    askToReplace(data, {
+      intro: `The version from ${new Date(v.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} has`,
+      button: 'Restore this version',
+      done: 'Version restored.',
+    });
+  } catch (err) {
+    showWarning(err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Only shown when this server keeps your data in your account.
+if (window.CloudSync && CloudSync.isEnabled()) versionsCard.hidden = false;
 document.getElementById('importFile').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (file) handleImportFile(file);
@@ -3770,6 +4017,46 @@ document.getElementById('signOutBtn').addEventListener('click', async (e) => {
     btn.disabled = false;
     showWarning("Couldn't sign out. Please try again.");
   }
+});
+
+document.getElementById('signOutWipeBtn').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const label = btn.textContent;
+  const reset = () => {
+    btn.disabled = false;
+    btn.textContent = label;
+  };
+  finalizePendingDelete(); // a delete still waiting on Undo counts as done
+  const synced = window.CloudSync && CloudSync.isEnabled();
+  btn.disabled = true;
+  if (synced) {
+    btn.textContent = 'Saving your latest changes…';
+    const allSaved = await CloudSync.flush();
+    if (
+      !allSaved &&
+      !confirm("Some changes haven't reached your account yet (you may be offline), so removing them here deletes them for good. Remove anyway?")
+    ) {
+      return reset();
+    }
+    if (allSaved && !confirm('Sign out and remove your data from this device? It stays in your account and comes back when you sign in again.')) {
+      return reset();
+    }
+  } else if (
+    !confirm("This server doesn't keep a copy of your data in your account, so this permanently deletes it from this browser. Export a backup first if you want to keep it. Continue?")
+  ) {
+    return reset();
+  }
+  btn.textContent = 'Signing out…';
+  try {
+    const res = await fetch('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!res.ok) throw new Error('logout failed');
+  } catch {
+    reset();
+    showWarning("Couldn't sign out, so nothing was removed. Please try again.");
+    return;
+  }
+  if (window.CloudSync) await CloudSync.wipeDevice();
+  location.replace('/login.html');
 });
 
 function escapeHtml(str) {

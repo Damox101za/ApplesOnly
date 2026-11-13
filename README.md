@@ -38,7 +38,10 @@ served by a small dependency-free Node.js server.
   Calendar, `.ics` import/export and backups. A dot on the Settings nav item
   means it has been a week since your last backup.
 - **Backup** — export/import all data as JSON (on the Settings page), with undo on deletes and
-  automatic schema migrations.
+  automatic schema migrations. Backups can be password-protected: the file is
+  encrypted in your browser (AES-256-GCM, key from your password via PBKDF2),
+  and there is no way to open it without the password.
+- **Keeping your data safe** — see [Data safety](#data-safety).
 - **Install as an app** — on a phone or computer, add it to your home screen
   or dock (Settings → Install the app, or Share → Add to Home Screen on an
   iPhone). It opens in its own window and still works with no connection;
@@ -135,13 +138,44 @@ Each account only ever sees its own data (it is keyed by the verified Google
 account, never by anything the browser sends). Saves carry the revision they were
 based on, so two devices cannot silently overwrite each other: if both changed
 things, lists are merged item by item. A deletion made on one device can come
-back if the other device still had that item. Data is stored as plain JSON, readable
-by whoever owns the database, so do not put secrets in your journal.
+back if the other device still had that item. Set `DATA_ENCRYPTION_KEY` (see
+[Data safety](#data-safety)) so the stored copy is encrypted.
 
 The first time you sign in on a device that already holds data, it is merged with
 the account's copy, so nothing on that device is lost. Signing in as a different
 Google account on the same browser clears that browser's copy first; it is safe in
 the first account.
+
+## Data safety
+
+- **Encrypted storage.** Set `DATA_ENCRYPTION_KEY` (at least 32 characters) and
+  each person's synced data is encrypted with AES-256-GCM before it is stored, so
+  someone who gets into the database (Upstash or `data/store.json`) sees only
+  scrambled text. Make one with:
+
+  ```bash
+  node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+  ```
+
+  On Vercel add it under **Settings → Environment Variables** and redeploy.
+  Data saved before the key was set is still read and is encrypted on its next
+  save. **Keep the key safe and never change it**: without it the synced copy
+  can't be read (your devices and backup files still have your data). If the key
+  goes missing the server refuses to overwrite encrypted data.
+- **Earlier versions.** Before your synced data changes, the account keeps the
+  previous copy, at most one every 6 hours and the last 30. Restoring a version
+  or importing a backup always keeps one first, so either can be undone. Restore
+  from **Settings → Your data → Earlier versions**.
+- **Sign out and remove from this device.** In the account menu. Use it on a
+  shared computer: it saves any unsynced changes to your account, signs out, and
+  removes your data, settings and the offline copy of the app from that browser.
+- **Password-protected backups.** See *Backup* above.
+- **Security headers.** Every response carries a strict Content Security Policy
+  (only this app's own scripts and Google's sign-in code may run), plus
+  `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`,
+  `Permissions-Policy` and `Strict-Transport-Security`. They live in
+  `security.js`, used by both the Node server and Vercel's middleware. Adding a
+  new outside service (a script, API or frame) means adding its host there.
 
 ## AI helpers (currently turned off)
 

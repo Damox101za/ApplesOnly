@@ -40,6 +40,7 @@
   let pushAgain = false;
   let appLoaded = false;
   let reloadApp = null;
+  let snapshotNext = false; // ask the server to keep its current copy as a version before the next save
 
   // ---------- local storage ----------
   const getItem = (k) => {
@@ -176,8 +177,11 @@
         const snapshot = readLocal();
         const startedAt = version;
         setStatus('saving');
-        const res = await api('PUT', { body: { baseRev: meta.rev || 0, data: snapshot } });
+        const body = { baseRev: meta.rev || 0, data: snapshot };
+        if (snapshotNext) body.snapshot = true;
+        const res = await api('PUT', { body });
         if (res.status === 200) {
+          if (body.snapshot) snapshotNext = false;
           meta.rev = res.json.rev;
           if (version === startedAt) meta.dirty = false;
           saveMeta();
@@ -326,8 +330,70 @@
     schedulePush();
   }
 
+  // Push anything unsaved now. Resolves true once the account has everything.
+  async function flush() {
+    if (!enabled) return false;
+    for (let attempt = 0; attempt < 20 && (meta.dirty || pushing); attempt++) {
+      if (pushing) await new Promise((r) => setTimeout(r, 250));
+      else {
+        clearTimeout(pushTimer);
+        await pushNow();
+        if (meta.dirty && !pushing) break; // the save failed (offline or server error)
+      }
+    }
+    return !meta.dirty;
+  }
+
+  // Earlier versions the server kept of this account's data.
+  async function listVersions() {
+    const res = await api('GET', { query: '?versions' });
+    if (res.status !== 200) throw new Error(res.json.error || "Couldn't load earlier versions.");
+    return res.json;
+  }
+
+  async function getVersion(at) {
+    const res = await api('GET', { query: `?version=${encodeURIComponent(at)}` });
+    if (res.status !== 200) throw new Error(res.json.error || "Couldn't load that version.");
+    return res.json;
+  }
+
+  // Removes everything this app stored in this browser: data, settings, sync
+  // state and the offline copy of the app. The account's copy is untouched.
+  async function wipeDevice() {
+    clearTimeout(pushTimer);
+    enabled = false;
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith(PREFIX))
+        .forEach(removeItem);
+      sessionStorage.clear();
+    } catch {
+      /* storage blocked: nothing stored either */
+    }
+    try {
+      if (window.caches) await Promise.all((await caches.keys()).map((name) => caches.delete(name)));
+      if (navigator.serviceWorker) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      }
+    } catch {
+      /* best effort */
+    }
+  }
+
   window.CloudSync = {
     changed,
+    flush,
+    listVersions,
+    getVersion,
+    wipeDevice,
+    isEnabled: () => enabled,
+    hasUnsavedChanges: () => enabled && meta.dirty,
+    // The next save keeps the account's current copy as a version first, so a
+    // restore or import can itself be undone.
+    keepVersionBeforeNextSave() {
+      snapshotNext = true;
+    },
     onRemoteChange(fn) {
       reloadApp = fn;
     },

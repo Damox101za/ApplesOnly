@@ -7,6 +7,7 @@ const ai = require('./ai');
 const auth = require('./auth');
 const gate = require('./gate');
 const dataApi = require('./data');
+const { securityHeaders } = require('./security');
 
 const port = process.env.PORT || 1337;
 
@@ -28,6 +29,8 @@ function redirect(res, location) {
 }
 
 const server = http.createServer((req, res) => {
+    // Every response (pages, files, API answers, errors) carries them.
+    for (const [name, value] of Object.entries(securityHeaders())) res.setHeader(name, value);
     let pathname;
     try {
         pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
