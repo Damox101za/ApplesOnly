@@ -12,7 +12,7 @@
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <title>Life Tracker</title>
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
-  <script>try{var t=JSON.parse(localStorage.getItem('lifeTracker.theme'));if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;if(JSON.parse(localStorage.getItem('lifeTracker.background'))==='off')document.documentElement.dataset.bg='off';}catch(e){}</script>
+  <script src="theme-init.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -56,6 +56,8 @@
                 <div class="account-name" id="accountName"></div>
                 <div class="account-email" id="accountEmail"></div>
                 <button type="button" id="signOutBtn" class="secondary-btn">Sign out</button>
+                <button type="button" id="signOutWipeBtn" class="account-wipe-btn">Sign out and remove from this device</button>
+                <p class="account-note">For shared computers. Your data stays in your account.</p>
               </div>
             </div>
             <button type="button" id="searchBtn" class="icon-btn" aria-label="Search (Ctrl+K)" title="Search (Ctrl+K)" aria-haspopup="dialog"></button>
@@ -426,10 +428,36 @@
                 <button type="button" id="exportBtn">Export backup</button>
                 <label class="file-btn">
                   Import backup
-                  <input type="file" id="importFile" accept="application/json">
+                  <input type="file" id="importFile" accept="application/json,.json">
                 </label>
               </div>
             </div>
+
+            <form class="import-confirm" id="exportPanel" autocomplete="off">
+              <p><strong>Protect the backup with a password?</strong> Leave both boxes empty for a plain file.</p>
+              <div class="password-fields">
+                <input type="password" id="exportPassword" placeholder="Password (optional)" autocomplete="new-password" aria-label="Backup password">
+                <input type="password" id="exportPassword2" placeholder="Repeat password" autocomplete="new-password" aria-label="Repeat backup password">
+              </div>
+              <p class="item-meta">A protected file can only be opened with this password, and there is no way to recover it if you forget it.</p>
+              <p class="form-error" id="exportError" role="alert"></p>
+              <div class="import-confirm-actions">
+                <button type="button" id="exportCancelBtn" class="secondary-btn">Cancel</button>
+                <button type="submit" id="exportGoBtn">Download backup</button>
+              </div>
+            </form>
+
+            <form class="import-confirm" id="importPasswordPanel" autocomplete="off">
+              <p><strong>This backup is password-protected.</strong> Enter its password to open it.</p>
+              <div class="password-fields">
+                <input type="password" id="importPassword" placeholder="Backup password" autocomplete="current-password" aria-label="Backup password">
+              </div>
+              <p class="form-error" id="importPasswordError" role="alert"></p>
+              <div class="import-confirm-actions">
+                <button type="button" id="importPasswordCancelBtn" class="secondary-btn">Cancel</button>
+                <button type="submit" id="importPasswordBtn">Unlock</button>
+              </div>
+            </form>
 
             <div class="import-confirm" id="importConfirm">
               <p id="importSummary"></p>
@@ -437,6 +465,17 @@
                 <button type="button" id="importCancelBtn" class="secondary-btn">Cancel</button>
                 <button type="button" id="importConfirmBtn">Replace my data</button>
               </div>
+            </div>
+
+            <div class="card settings-card" id="versionsCard" hidden>
+              <div class="setting-row">
+                <div>
+                  <div class="card-title-plain">Earlier versions</div>
+                  <div class="google-status" id="versionsHint">Your account keeps copies of your data from before recent changes. If something goes missing, restore one.</div>
+                </div>
+                <button type="button" id="versionsBtn" class="secondary-btn" aria-expanded="false" aria-controls="versionList">Show</button>
+              </div>
+              <ul class="version-list" id="versionList" hidden></ul>
             </div>
           </section>
         </main>

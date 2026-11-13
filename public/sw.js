@@ -4,12 +4,13 @@
 // is only the fallback. Your data lives in localStorage, not here, and
 // /api/* (sign-in, sync, AI) is never cached.
 
-const CACHE = 'lifetracker-v1';
+const CACHE = 'lifetracker-v2';
 const SHELL = [
   '/',
   '/style.css',
   '/app.js',
   '/background.js',
+  '/theme-init.js',
   '/firebase-client.js',
   '/sync.js',
   '/manifest.webmanifest',

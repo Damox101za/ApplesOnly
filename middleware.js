@@ -8,11 +8,15 @@
 
 import { next } from '@vercel/functions';
 import gate from './gate.js';
+import security from './security.js';
 
 export const config = { runtime: 'nodejs' };
 
+// Security headers go on every response, including the ones answered here.
+const withSecurity = (headers = {}) => ({ ...security.securityHeaders(), ...headers });
+
 function noStore(init) {
-  return { ...init, headers: { 'Cache-Control': 'no-store', ...(init.headers || {}) } };
+  return { ...init, headers: withSecurity({ 'Cache-Control': 'no-store', ...(init.headers || {}) }) };
 }
 
 export default function middleware(request) {
@@ -30,7 +34,7 @@ export default function middleware(request) {
     // A bug here must not take the whole site down; the app itself holds no
     // server-side secrets, and the API routes check the session on their own.
     console.error('Sign-in gate failed, letting the request through:', err && err.message);
-    return next();
+    return next({ headers: withSecurity() });
   }
 
   if (verdict.action === 'redirect') {
@@ -43,5 +47,5 @@ export default function middleware(request) {
     }
     return new Response('401 Sign in required', noStore({ status: 401 }));
   }
-  return next();
+  return next({ headers: withSecurity() });
 }

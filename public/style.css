@@ -2481,6 +2481,94 @@ html[data-bg="off"] .login-bg {
   }
 }
 
+/* ---------- Data safety ---------- */
+.password-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.password-fields input {
+  flex: 1 1 12rem;
+}
+
+.form-error {
+  color: var(--neg);
+  font-size: 0.85rem;
+}
+
+.form-error:empty {
+  display: none;
+}
+
+#versionsCard {
+  margin-top: 1rem;
+}
+
+.version-list {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.version-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0;
+}
+
+.version-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.version-when {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.version-what {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.version-list .secondary-btn {
+  flex: none;
+}
+
+.version-empty {
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+}
+
+.account-wipe-btn {
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0;
+  border: 0;
+  background: none;
+  color: var(--neg);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: center;
+  cursor: pointer;
+}
+
+.account-wipe-btn:hover {
+  text-decoration: underline;
+}
+
+.account-note {
+  margin: 0.15rem 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
 /* ---------- Settings ---------- */
 .settings-heading:first-child {
   margin-top: 0;
