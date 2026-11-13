@@ -30,8 +30,11 @@ served by a small dependency-free Node.js server.
 - **Life Wheel** — radar chart of 8 life areas scored 0–10. Tag habits with an
   area and the score comes from how often you did them in the last 30 days;
   areas without habits use a manual slider.
-- **Money** — a 50/30/20 budget split from your monthly income, a sinking-fund
-  calculator, and short budgeting guides.
+- **Money** — a 50/30/20 budget split from your monthly income, with spending
+  logged against it: add what you spent (amount, what for, needs / wants /
+  savings, date) and each part shows how much is left or how far over you are,
+  month by month. Plus a sinking-fund calculator and short budgeting guides.
+  Spending syncs, is encrypted, and is part of backups like everything else.
 - **Dashboard** — stats, a task-status breakdown, streak cards and a
   GitHub-style activity heatmap.
 - **Settings** — one place for theme, the animated background, Google
@@ -46,7 +49,7 @@ served by a small dependency-free Node.js server.
   or dock (Settings → Install the app, or Share → Add to Home Screen on an
   iPhone). It opens in its own window and still works with no connection;
   changes sync when you are back online. Offline support needs https (or
-  localhost), which Vercel and Azure both provide.
+  localhost), which Vercel provides.
 - **Light and dark themes** — follows your system, or use the toggle in the
   header.
 - **Animated background** — a soft, slowly moving banner at the top of every page
@@ -89,7 +92,7 @@ npm start
    a secret; Firebase web keys are meant to be public.
 5. Set `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY` and `SESSION_SECRET` (a long
    random string, at least 16 characters; without it sign-in stays off). On
-   Azure these are app settings instead of a `.env` file. Optionally set
+   a host these are its environment settings instead of a `.env` file. Optionally set
    `FIREBASE_AUTH_DOMAIN` if you don't use the default
    `<projectId>.firebaseapp.com`.
 
@@ -207,3 +210,28 @@ npm start
 ```
 
 Then open http://localhost:1337 in your browser.
+
+## Tests
+
+```bash
+npm test
+```
+
+Runs the server and data tests with Node's built-in test runner: encryption,
+the version history, the sign-in gate, security headers, and `/api/data`
+against a real server process. The Redis tests run only when a Redis is
+listening on `REDIS_PORT` (default 6379); otherwise they are skipped.
+
+```bash
+npx playwright install chromium   # once
+npm run test:browser
+```
+
+Runs the app in a real browser: quick-add parsing, data migrations, habit
+streaks, goal progress, `.ics` import, sync merging, password-protected
+backups, and a click-through of every page with the Content Security Policy
+enforced.
+
+GitHub runs both on every push and pull request (`.github/workflows/tests.yml`,
+with a real Redis), so a pull request shows a red cross if something broke.
+The live site is deployed by Vercel from `main`.

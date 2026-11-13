@@ -1937,6 +1937,96 @@ textarea.edit-input {
   background: var(--chart-3);
 }
 
+/* Spending against the 50/30/20 budget */
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.month-nav-label {
+  min-width: 8.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  .month-nav-label {
+    min-width: 6.5rem;
+    font-size: 0.8rem;
+  }
+}
+
+.spend-summary {
+  margin: 0 0 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+}
+
+.spend-summary strong {
+  color: var(--foreground);
+}
+
+.money .neg,
+.spend-summary .neg,
+.money-row .neg {
+  color: var(--neg);
+}
+
+.progress-fill.over {
+  background: var(--neg);
+}
+
+.expense-form {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.expense-list {
+  margin-top: 1rem;
+}
+
+.expense-amount {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.spend-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.35rem;
+  padding: 0 0.4rem;
+  border-radius: 4px;
+  background: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.spend-chip::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.3rem;
+  border-radius: 50%;
+}
+
+.spend-needs::before {
+  background: var(--chart-1);
+}
+
+.spend-wants::before {
+  background: var(--chart-2);
+}
+
+.spend-savings::before {
+  background: var(--chart-3);
+}
+
 .sf-result {
   margin: 0.75rem 0 0;
   font-weight: 500;

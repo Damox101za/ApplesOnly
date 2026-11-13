@@ -39,6 +39,7 @@ function loadEnv(file = path.join(__dirname, '.env')) {
   });
 }
 
-loadEnv();
+// The test suite sets SKIP_DOTENV so a local .env can't change what it tests.
+if (process.env.SKIP_DOTENV !== '1') loadEnv();
 
 module.exports = { parse, loadEnv };

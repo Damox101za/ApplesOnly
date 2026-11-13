@@ -302,9 +302,42 @@
               </form>
             </div>
 
-            <div class="card">
-              <header class="card-head"><div class="card-title"><span>Budget split: the 50/30/20 rule</span></div></header>
+            <div class="card" id="spendingCard">
+              <header class="card-head">
+                <div class="card-title"><span>Budget &amp; spending</span></div>
+                <div class="month-nav">
+                  <button type="button" id="spendPrev" class="icon-btn small" aria-label="Previous month">‹</button>
+                  <span class="month-nav-label" id="spendMonthLabel" aria-live="polite"></span>
+                  <button type="button" id="spendNext" class="icon-btn small" aria-label="Next month">›</button>
+                </div>
+              </header>
+              <p class="spend-summary" id="spendSummary"></p>
               <div id="moneyAllocation" class="money-allocation"></div>
+
+              <form id="expenseForm" class="money-form expense-form" autocomplete="off">
+                <label class="field field-sm">
+                  <span>Amount</span>
+                  <input type="number" id="expenseAmount" min="0.01" step="any" inputmode="decimal" placeholder="e.g. 250" required>
+                </label>
+                <label class="field">
+                  <span>What for</span>
+                  <input type="text" id="expenseNote" maxlength="80" placeholder="e.g. Groceries">
+                </label>
+                <label class="field field-sm">
+                  <span>Part of budget</span>
+                  <select id="expenseCategory">
+                    <option value="needs">Needs</option>
+                    <option value="wants">Wants</option>
+                    <option value="savings">Savings &amp; debt</option>
+                  </select>
+                </label>
+                <label class="field field-sm">
+                  <span>Date</span>
+                  <input type="date" id="expenseDate" required>
+                </label>
+                <button type="submit">Add</button>
+              </form>
+              <ul class="item-list expense-list" id="expenseList"></ul>
             </div>
 
             <div class="card">

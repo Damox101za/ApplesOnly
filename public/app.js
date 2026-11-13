@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
   wheelRatings: 'lifeTracker.wheelRatings',
   projects: 'lifeTracker.projects',
   money: 'lifeTracker.money',
+  expenses: 'lifeTracker.expenses',
   theme: 'lifeTracker.theme',
   background: 'lifeTracker.background',
   taskFormMore: 'lifeTracker.taskFormMore',
@@ -178,6 +179,15 @@ function loadAndMigrate() {
 
 let { habits, journal, goals, tasks, projects } = loadAndMigrate();
 let money = load(STORAGE_KEYS.money, {});
+let expenses = loadExpenses();
+
+// Spending entries: { id, amount, note, category: needs|wants|savings, date: YYYY-MM-DD, createdAt }.
+function loadExpenses() {
+  const list = load(STORAGE_KEYS.expenses, []);
+  return Array.isArray(list)
+    ? list.filter((e) => e && typeof e.amount === 'number' && e.amount > 0 && /^\d{4}-\d{2}-\d{2}$/.test(e.date))
+    : [];
+}
 
 // Set once everything is defined; the page banner reads data declared further down.
 let appReady = false;
@@ -270,6 +280,7 @@ function listFor(type) {
   if (type === 'journal') return journal;
   if (type === 'goal') return goals;
   if (type === 'project') return projects;
+  if (type === 'expense') return expenses;
   return tasks;
 }
 
@@ -278,6 +289,7 @@ function saveList(type) {
   else if (type === 'journal') save(STORAGE_KEYS.journal, journal);
   else if (type === 'goal') save(STORAGE_KEYS.goals, goals);
   else if (type === 'project') save(STORAGE_KEYS.projects, projects);
+  else if (type === 'expense') save(STORAGE_KEYS.expenses, expenses);
   else save(STORAGE_KEYS.tasks, tasks);
 }
 
@@ -2272,7 +2284,7 @@ document.getElementById('icsImportCancelBtn').addEventListener('click', cancelIC
 
 // ---------- Backup: export / import ----------
 function hasAnyData() {
-  return habits.length > 0 || journal.length > 0 || goals.length > 0 || tasks.length > 0 || projects.length > 0;
+  return habits.length > 0 || journal.length > 0 || goals.length > 0 || tasks.length > 0 || projects.length > 0 || expenses.length > 0;
 }
 
 function daysSinceLastBackup() {
@@ -2355,6 +2367,7 @@ async function exportBackup(password = '') {
     tasks,
     projects,
     money,
+    expenses,
     wheelRatings,
   };
   const json = JSON.stringify(payload, null, 2);
@@ -2381,7 +2394,8 @@ function isValidBackup(data) {
     Array.isArray(data.journal) &&
     Array.isArray(data.goals) &&
     (data.tasks === undefined || Array.isArray(data.tasks)) &&
-    (data.projects === undefined || Array.isArray(data.projects))
+    (data.projects === undefined || Array.isArray(data.projects)) &&
+    (data.expenses === undefined || Array.isArray(data.expenses))
   );
 }
 
@@ -2394,7 +2408,7 @@ function contentsText(data) {
   const journalCount = n(data.journal);
   return (
     `${n(data.habits)} habit(s), ${journalCount} journal entr${journalCount === 1 ? 'y' : 'ies'}, ` +
-    `${n(data.goals)} goal(s), ${n(data.tasks)} task(s), and ${n(data.projects)} project(s)`
+    `${n(data.goals)} goal(s), ${n(data.tasks)} task(s), ${n(data.projects)} project(s), and ${n(data.expenses)} spending entr${n(data.expenses) === 1 ? 'y' : 'ies'}`
   );
 }
 
@@ -2515,7 +2529,7 @@ function confirmImport() {
   if (!pendingImport) return;
   // Have the account keep what it has now as an earlier version first.
   if (window.CloudSync && CloudSync.isEnabled()) CloudSync.keepVersionBeforeNextSave();
-  const previous = { habits, journal, goals, tasks, projects, money };
+  const previous = { habits, journal, goals, tasks, projects, money, expenses };
   const migrated = migrate({
     habits: pendingImport.habits,
     journal: pendingImport.journal,
@@ -2530,6 +2544,8 @@ function confirmImport() {
   tasks = migrated.tasks;
   projects = migrated.projects;
   money = pendingImport.money && typeof pendingImport.money === 'object' ? pendingImport.money : {};
+  save(STORAGE_KEYS.expenses, Array.isArray(pendingImport.expenses) ? pendingImport.expenses : []);
+  expenses = loadExpenses();
   save(STORAGE_KEYS.habits, habits);
   save(STORAGE_KEYS.journal, journal);
   save(STORAGE_KEYS.goals, goals);
@@ -2554,6 +2570,8 @@ function confirmImport() {
     tasks = previous.tasks;
     projects = previous.projects;
     money = previous.money;
+    expenses = previous.expenses;
+    save(STORAGE_KEYS.expenses, expenses);
     save(STORAGE_KEYS.habits, habits);
     save(STORAGE_KEYS.journal, journal);
     save(STORAGE_KEYS.goals, goals);
@@ -2594,6 +2612,7 @@ function versionWhatText(counts) {
     [counts.goals, 'goal'],
     [counts.projects, 'project'],
     [counts.journal, 'journal entry'],
+    [counts.expenses, 'spending entry'],
   ]
     .filter(([n]) => n)
     .map(([n, word]) => `${n} ${n === 1 ? word : word.replace(/y$/, 'ie') + 's'}`);
@@ -2641,7 +2660,7 @@ versionList.addEventListener('click', async (e) => {
     const v = await CloudSync.getVersion(btn.dataset.version);
     const data = v.data || {};
     // A version only holds what existed then; fill in empty lists so it imports cleanly.
-    ['habits', 'journal', 'goals', 'tasks', 'projects'].forEach((k) => {
+    ['habits', 'journal', 'goals', 'tasks', 'projects', 'expenses'].forEach((k) => {
       if (!Array.isArray(data[k])) data[k] = [];
     });
     askToReplace(data, {
@@ -2675,6 +2694,7 @@ window.addEventListener('storage', (e) => {
   tasks = load(STORAGE_KEYS.tasks, []);
   projects = load(STORAGE_KEYS.projects, []);
   money = load(STORAGE_KEYS.money, {});
+  expenses = loadExpenses();
   wheelRatings = load(STORAGE_KEYS.wheelRatings, {});
   renderHabits();
   renderJournal();
@@ -3355,22 +3375,145 @@ function renderMoney() {
   if (document.activeElement !== currencyInput) currencyInput.value = moneyCurrency();
 
   const income = moneyIncome();
-  document.getElementById('moneyAllocation').innerHTML = income
-    ? MONEY_SPLITS.map(
-        (r) => `
+  const spent = spendingByCategory(spendMonth);
+  const total = spent.needs + spent.wants + spent.savings;
+
+  document.getElementById('spendMonthLabel').textContent = monthLabel(spendMonth);
+  document.getElementById('spendNext').disabled = spendMonth >= monthKey(new Date());
+  document.getElementById('spendSummary').innerHTML = income
+    ? `Spent <strong>${escapeHtml(fmtMoney(total))}</strong> of ${escapeHtml(fmtMoney(income))}` +
+      (total > income
+        ? ` · <span class="neg">${escapeHtml(fmtMoney(total - income))} over</span>`
+        : ` · ${escapeHtml(fmtMoney(income - total))} left`)
+    : total
+      ? `Spent <strong>${escapeHtml(fmtMoney(total))}</strong>. Add your income above to see it against your budget.`
+      : 'Add your monthly income above to see your 50/30/20 budget.';
+
+  document.getElementById('moneyAllocation').innerHTML = MONEY_SPLITS.map((r) => {
+    const budget = (income * r.pct) / 100;
+    const used = spent[r.key];
+    const over = income > 0 && used > budget;
+    const fill = income > 0 ? Math.min(100, (used / budget) * 100) : 0;
+    const verb = r.key === 'savings' ? 'put away' : 'spent';
+    const amount = income > 0
+      ? `${escapeHtml(fmtMoney(used))} <span class="item-meta">of ${escapeHtml(fmtMoney(budget))}</span>`
+      : escapeHtml(fmtMoney(used));
+    const note = income > 0
+      ? over
+        ? r.key === 'savings'
+          ? `${escapeHtml(fmtMoney(used - budget))} more than the ${r.pct}% goal. Nice.`
+          : `<span class="neg">${escapeHtml(fmtMoney(used - budget))} over budget</span>`
+        : `${escapeHtml(fmtMoney(budget - used))} ${r.key === 'savings' ? 'to go' : 'left'} · ${r.pct}% · ${escapeHtml(r.hint)}`
+      : escapeHtml(r.hint);
+    return `
         <div class="money-row">
           <div class="money-row-head">
             <span class="money-row-label">${escapeHtml(r.label)}</span>
-            <span class="money-row-amount">${escapeHtml(fmtMoney((income * r.pct) / 100))} <span class="item-meta">${r.pct}%</span></span>
+            <span class="money-row-amount" title="${verb}">${amount}</span>
           </div>
-          <div class="progress-track"><div class="progress-fill money-${r.key}" style="width:${r.pct}%"></div></div>
-          <div class="item-meta">${escapeHtml(r.hint)}</div>
-        </div>`
-      ).join('')
-    : '<p class="empty-state">Enter your monthly after-tax income above to see your split.</p>';
+          <div class="progress-track"><div class="progress-fill money-${r.key}${over && r.key !== 'savings' ? ' over' : ''}" style="width:${fill}%"></div></div>
+          <div class="item-meta">${note}</div>
+        </div>`;
+  }).join('');
+
+  renderExpenseList();
   renderSinkingFund();
   renderBanner();
 }
+
+// ---------- Spending ----------
+const monthKey = (d) => localDateKey(d).slice(0, 7);
+let spendMonth = monthKey(new Date()); // the month the Money page is showing, YYYY-MM
+
+function monthLabel(key) {
+  const [y, m] = key.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+}
+
+function shiftMonth(key, by) {
+  const [y, m] = key.split('-').map(Number);
+  return monthKey(new Date(y, m - 1 + by, 1));
+}
+
+function spendingByCategory(month) {
+  const out = { needs: 0, wants: 0, savings: 0 };
+  expenses.forEach((e) => {
+    if (e.date.startsWith(month) && out[e.category] !== undefined) out[e.category] += e.amount;
+  });
+  return out;
+}
+
+const CATEGORY_LABELS = { needs: 'Needs', wants: 'Wants', savings: 'Savings & debt' };
+
+function renderExpenseList() {
+  const list = document.getElementById('expenseList');
+  const rows = expenses
+    .filter((e) => e.date.startsWith(spendMonth))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
+  list.innerHTML = rows.length
+    ? rows
+        .map(
+          (e) => `
+      <li class="item-card" data-id="${escapeHtml(e.id)}">
+        <div class="item-main">
+          <div class="item-title">${escapeHtml(e.note || CATEGORY_LABELS[e.category])}</div>
+          <div class="item-meta"><span class="spend-chip spend-${escapeHtml(e.category)}">${escapeHtml(CATEGORY_LABELS[e.category] || '')}</span>
+            ${escapeHtml(new Date(`${e.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }))}</div>
+        </div>
+        <div class="expense-amount">${escapeHtml(fmtMoneyExact(e.amount))}</div>
+        <button type="button" class="icon-btn small" data-delete-expense="${escapeHtml(e.id)}" aria-label="Delete">✕</button>
+      </li>`
+        )
+        .join('')
+    : `<li class="empty-state">No spending logged for ${escapeHtml(monthLabel(spendMonth))}.</li>`;
+}
+
+// Amounts in the list keep their cents; budget totals round to whole units.
+function fmtMoneyExact(n) {
+  return `${moneyCurrency()}${n.toLocaleString(undefined, { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+}
+
+document.getElementById('expenseDate').value = todayKey();
+
+document.getElementById('expenseForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const amountInput = document.getElementById('expenseAmount');
+  const amount = Math.round(parseFloat(amountInput.value) * 100) / 100;
+  const date = document.getElementById('expenseDate').value;
+  if (!(amount > 0) || amount > 1e9 || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    amountInput.focus();
+    return;
+  }
+  const category = document.getElementById('expenseCategory').value;
+  expenses.push({
+    id: uid(),
+    amount,
+    note: document.getElementById('expenseNote').value.trim().slice(0, 80),
+    category: CATEGORY_LABELS[category] ? category : 'needs',
+    date,
+    createdAt: Date.now(),
+  });
+  save(STORAGE_KEYS.expenses, expenses);
+  spendMonth = date.slice(0, 7); // show the month it went into
+  amountInput.value = '';
+  document.getElementById('expenseNote').value = '';
+  renderMoney();
+  amountInput.focus();
+});
+
+document.getElementById('expenseList').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-delete-expense]');
+  if (btn) queueDelete('expense', expenses, btn.dataset.deleteExpense, renderMoney);
+});
+
+document.getElementById('spendPrev').addEventListener('click', () => {
+  spendMonth = shiftMonth(spendMonth, -1);
+  renderMoney();
+});
+document.getElementById('spendNext').addEventListener('click', () => {
+  if (spendMonth < monthKey(new Date())) spendMonth = shiftMonth(spendMonth, 1);
+  renderMoney();
+});
 
 function renderSinkingFund() {
   const target = parseFloat(document.getElementById('sfTarget').value);
@@ -3699,11 +3842,16 @@ function bannerFor(tab) {
     }
     case 'settings':
       return { title: 'Make it yours', sub: 'Appearance, calendar connections and backups' };
-    case 'money':
-      return {
-        title: 'Your money',
-        sub: moneyIncome() ? `Monthly income ${escapeHtml(fmtMoney(moneyIncome()))} · ${escapeHtml(fmtMoney(moneyIncome() * 0.2))} to save` : 'Add your income to see your split',
-      };
+    case 'money': {
+      const s = spendingByCategory(monthKey(new Date()));
+      const spentNow = s.needs + s.wants + s.savings;
+      const income = moneyIncome();
+      let sub = 'Add your income to see your split';
+      if (income && spentNow) sub = `Spent ${escapeHtml(fmtMoney(spentNow))} of ${escapeHtml(fmtMoney(income))} this month`;
+      else if (income) sub = `Monthly income ${escapeHtml(fmtMoney(income))} · ${escapeHtml(fmtMoney(income * 0.2))} to save`;
+      else if (spentNow) sub = `Spent ${escapeHtml(fmtMoney(spentNow))} this month`;
+      return { title: 'Your money', sub };
+    }
     default:
       return { title: '', sub: '' };
   }
@@ -3767,6 +3915,11 @@ function searchIndex() {
       meta: [`${j.mood} ${new Date(j.createdAt).toLocaleDateString()}`, ...(j.tags || []).map((t) => `#${t}`)].join(' '),
       text: `${j.text} ${(j.tags || []).join(' ')}`,
     })),
+    ...[...expenses].sort((a, b) => b.date.localeCompare(a.date)).map((x) => ({
+      kind: 'Spending', tab: 'money', id: x.id, icon: 'wallet', title: x.note || CATEGORY_LABELS[x.category],
+      meta: `${fmtMoneyExact(x.amount)} · ${CATEGORY_LABELS[x.category]} · ${x.date}`,
+      text: `${x.note} ${CATEGORY_LABELS[x.category]}`, month: x.date.slice(0, 7),
+    })),
     ...pages,
   ];
 }
@@ -3781,7 +3934,7 @@ function searchFind(query) {
     if (item.kind === 'Pages') return words.every((w) => hay.split(/\s+/).some((part) => part.startsWith(w)));
     return words.every((w) => hay.includes(w));
   });
-  const order = ['Pages', 'Tasks', 'Habits', 'Goals', 'Projects', 'Journal'];
+  const order = ['Pages', 'Tasks', 'Habits', 'Goals', 'Projects', 'Journal', 'Spending'];
   hits.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || Number(!!a.done) - Number(!!b.done));
   // At most 6 of each kind, so one busy section can't push the rest out.
   const seen = {};
@@ -3856,6 +4009,11 @@ function openSearchHit(hit) {
   if (hit.tab === 'journal' && journalTagFilter) {
     journalTagFilter = null;
     renderJournal();
+  }
+  // A spending entry may be in another month than the one showing.
+  if (hit.month && hit.month !== spendMonth) {
+    spendMonth = hit.month;
+    renderMoney();
   }
   showTab(hit.tab);
   if (!hit.id) return;
@@ -4084,6 +4242,7 @@ initAccount();
 function reloadFromStorage() {
   ({ habits, journal, goals, tasks, projects } = loadAndMigrate());
   money = load(STORAGE_KEYS.money, {});
+  expenses = loadExpenses();
   wheelRatings = load(STORAGE_KEYS.wheelRatings, {});
   renderHabits();
   renderJournal();
