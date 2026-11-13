@@ -1,7 +1,7 @@
 // Vercel Routing Middleware: runs before static files and before the CDN cache,
 // so it can guard the whole site even though the app is plain static files on
 // Vercel. The rules live in gate.js, shared with the Node server (index.js).
-// It does nothing unless GOOGLE_CLIENT_ID and SESSION_SECRET are both set.
+// It does nothing unless FIREBASE_PROJECT_ID, FIREBASE_API_KEY and SESSION_SECRET are all set.
 //
 // This file uses ES module syntax because Vercel bundles it; the rest of the
 // project is CommonJS, and the Node server never loads this file.

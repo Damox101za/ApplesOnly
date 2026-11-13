@@ -2157,6 +2157,33 @@ textarea.edit-input {
   margin: 1.5rem 0 0.5rem;
 }
 
+.google-signin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 280px;
+  min-height: 44px;
+  padding: 0 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 0.5rem);
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.google-signin:hover:not(:disabled) {
+  background: var(--accent, var(--muted));
+}
+
+.google-signin:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .login-status {
   min-height: 1.3em;
   margin: 0.25rem 0 0.5rem;

@@ -1,6 +1,6 @@
 'use strict';
-// Sign-in page: asks the server whether login is on, shows Google's button,
-// and trades the ID token Google returns for our session cookie.
+// Sign-in page: asks the server whether login is on, signs in with Google
+// through Firebase, and trades Firebase's ID token for our session cookie.
 
 const loginStatus = document.getElementById('loginStatus');
 const loginRetry = document.getElementById('loginRetry');
@@ -28,29 +28,89 @@ async function submitCredential(credential) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setLoginStatus(data.error || 'Sign-in failed. Please try again.', true);
+      buttonSlot.disabled = false;
       return;
     }
     location.replace('/');
   } catch {
+    buttonSlot.disabled = false;
     showFailure("Couldn't reach the server. Check your connection and try again.");
   }
 }
 
-function waitForGoogle(timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const started = Date.now();
-    (function poll() {
-      if (window.google && google.accounts && google.accounts.id) return resolve();
-      if (Date.now() - started > timeoutMs) return reject(new Error('timeout'));
-      setTimeout(poll, 100);
-    })();
-  });
+// Firebase handles the Google OAuth client for us; we only need its web config
+// from the server. The SDK is loaded on demand from Google's CDN.
+const FIREBASE_VERSION = '11.9.1';
+const FIREBASE_CDN = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
+
+let firebase = null; // { auth, GoogleAuthProvider, signInWithPopup, ... }
+
+async function loadFirebase(config) {
+  if (firebase) return firebase;
+  const [appMod, authMod] = await Promise.all([
+    import(`${FIREBASE_CDN}/firebase-app.js`),
+    import(`${FIREBASE_CDN}/firebase-auth.js`),
+  ]);
+  const app = appMod.initializeApp(config);
+  firebase = { ...authMod, auth: authMod.getAuth(app) };
+  return firebase;
 }
 
-function prefersDark() {
-  const theme = document.documentElement.dataset.theme;
-  if (theme) return theme === 'dark';
-  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+// Trade the Firebase sign-in for our own session cookie, then forget Firebase's
+// copy so this browser only holds one session.
+async function finishSignIn(user) {
+  const idToken = await user.getIdToken();
+  await submitCredential(idToken);
+  try {
+    await firebase.auth.signOut();
+  } catch {
+    /* nothing to clean up */
+  }
+}
+
+function friendlyError(err) {
+  switch (err && err.code) {
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return 'Sign-in was cancelled. Try again when you are ready.';
+    case 'auth/unauthorized-domain':
+      return `This address (${location.hostname}) isn't allowed to sign in yet. Add it under Authentication > Settings > Authorized domains in Firebase.`;
+    case 'auth/operation-not-allowed':
+      return 'Google sign-in is not turned on in Firebase yet (Authentication > Sign-in method).';
+    case 'auth/network-request-failed':
+      return "Couldn't reach Google. Check your connection and try again.";
+    case 'auth/account-exists-with-different-credential':
+      return 'That email already uses a different sign-in method.';
+    default:
+      return 'Could not sign in with Google. Please try again.';
+  }
+}
+
+async function signInWithGoogle() {
+  buttonSlot.disabled = true;
+  loginRetry.hidden = true;
+  setLoginStatus('Opening Google…');
+  const provider = new firebase.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  try {
+    const result = await firebase.signInWithPopup(firebase.auth, provider);
+    await finishSignIn(result.user);
+  } catch (err) {
+    if (err && err.code === 'auth/popup-blocked') {
+      // Popups are blocked: do a full-page redirect instead and finish on return.
+      try {
+        await firebase.signInWithRedirect(firebase.auth, provider);
+        return;
+      } catch (redirectErr) {
+        console.error('Google sign-in redirect failed:', redirectErr);
+        setLoginStatus(friendlyError(redirectErr), true);
+      }
+    } else {
+      console.error('Google sign-in failed:', err);
+      setLoginStatus(friendlyError(err), true);
+    }
+    buttonSlot.disabled = false;
+  }
 }
 
 async function startLogin() {
@@ -70,29 +130,32 @@ async function startLogin() {
   }
 
   try {
-    await waitForGoogle(10000);
-  } catch {
+    await loadFirebase(config.firebase);
+  } catch (err) {
+    console.error('Could not load Firebase:', err);
     showFailure("Couldn't load Google sign-in. Check your connection or any content blocker, then try again.");
     return;
   }
 
-  google.accounts.id.initialize({
-    client_id: config.clientId,
-    callback: (response) => submitCredential(response.credential),
-    auto_select: false,
-  });
-  buttonSlot.innerHTML = '';
-  google.accounts.id.renderButton(buttonSlot, {
-    theme: prefersDark() ? 'filled_black' : 'outline',
-    size: 'large',
-    shape: 'rectangular',
-    text: 'signin_with',
-    width: 280,
-  });
+  // Coming back from a redirect sign-in (used when popups are blocked).
+  try {
+    const result = await firebase.getRedirectResult(firebase.auth);
+    if (result && result.user) {
+      buttonSlot.disabled = true;
+      await finishSignIn(result.user);
+      return;
+    }
+  } catch (err) {
+    console.error('Google redirect sign-in failed:', err);
+    setLoginStatus(friendlyError(err), true);
+  }
+
+  buttonSlot.disabled = false;
 }
 
 // It covers the whole screen, so draw it small and at a gentler frame rate.
 if (window.AnimatedBackground) AnimatedBackground.mount(document.getElementById('loginCanvas'), { scale: 0.2, fps: 24 });
 
+buttonSlot.addEventListener('click', signInWithGoogle);
 loginRetry.addEventListener('click', startLogin);
 startLogin();

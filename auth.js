@@ -1,19 +1,21 @@
 'use strict';
-// "Sign in with Google" for the server. The browser gets a Google ID token from
-// Google Identity Services and posts it here; we verify it and hand back our
-// own signed, HttpOnly session cookie. Nothing is stored server-side.
+// "Sign in with Google" for the server, through Firebase Authentication. The
+// browser signs in with Firebase (which handles the Google OAuth client itself)
+// and posts the Firebase ID token here; we verify it and hand back our own
+// signed, HttpOnly session cookie. Nothing is stored server-side.
 //
-// Turned on by setting BOTH GOOGLE_CLIENT_ID and SESSION_SECRET (a long random
-// string, at least 16 characters). With either missing the app stays open, as
-// it was before login existed, so a half-finished setup can never lock anyone
-// out. Sessions are stateless cookies signed with SESSION_SECRET, so they work
+// Turned on by setting FIREBASE_PROJECT_ID, FIREBASE_API_KEY and SESSION_SECRET
+// (a long random string, at least 16 characters). With any of them missing the
+// app stays open, as it was before login existed, so a half-finished setup can
+// never lock anyone out. Sessions are stateless cookies signed with SESSION_SECRET, so they work
 // across restarts and across serverless instances.
 
 const crypto = require('crypto');
 const { sendJson, sameOrigin, readJsonBody, closeAfterResponse, clientIp } = require('./httpkit');
 
-const JWKS_URL = process.env.GOOGLE_JWKS_URL || 'https://www.googleapis.com/oauth2/v3/certs';
-const ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
+// Firebase signs its ID tokens with these keys (RS256).
+const JWKS_URL =
+  process.env.FIREBASE_JWKS_URL || 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 
 const COOKIE_NAME = 'lt_session';
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -31,8 +33,21 @@ const LOGIN_LIMIT = 30;
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const loginHits = new Map();
 
-function clientId() {
-  return process.env.GOOGLE_CLIENT_ID || '';
+function projectId() {
+  return (process.env.FIREBASE_PROJECT_ID || '').trim();
+}
+
+function apiKey() {
+  return (process.env.FIREBASE_API_KEY || '').trim();
+}
+
+// Safe to share with the browser; Firebase web config is not a secret.
+function firebaseConfig() {
+  return {
+    apiKey: apiKey(),
+    projectId: projectId(),
+    authDomain: (process.env.FIREBASE_AUTH_DOMAIN || '').trim() || `${projectId()}.firebaseapp.com`,
+  };
 }
 
 function sessionSecret() {
@@ -40,12 +55,12 @@ function sessionSecret() {
 }
 
 function isEnabled() {
-  return Boolean(clientId()) && sessionSecret().length >= SECRET_MIN_CHARS;
+  return Boolean(projectId()) && Boolean(apiKey()) && sessionSecret().length >= SECRET_MIN_CHARS;
 }
 
-if (clientId() && !isEnabled()) {
+if (projectId() && !isEnabled()) {
   console.warn(
-    `Sign-in is OFF: GOOGLE_CLIENT_ID is set, but SESSION_SECRET is missing or shorter than ${SECRET_MIN_CHARS} characters.`
+    `Sign-in is OFF: it needs FIREBASE_PROJECT_ID, FIREBASE_API_KEY and a SESSION_SECRET of at least ${SECRET_MIN_CHARS} characters.`
   );
 }
 
@@ -116,7 +131,7 @@ function getSession(req) {
   return sessionFromCookieHeader(req.headers.cookie);
 }
 
-// ---------- verifying Google's ID token ----------
+// ---------- verifying Firebase's ID token ----------
 let jwks = { keys: null, fetchedAt: 0 };
 
 async function loadKeys() {
@@ -131,7 +146,7 @@ async function findKey(kid) {
   const age = Date.now() - jwks.fetchedAt;
   if (!jwks.keys || age > JWKS_TTL_MS) await loadKeys();
   let jwk = jwks.keys.find((k) => k.kid === kid && k.kty === 'RSA');
-  // Google rotates keys; if one is unknown, refresh once (but not on every request).
+  // Keys rotate; if one is unknown, refresh once (but not on every request).
   if (!jwk && Date.now() - jwks.fetchedAt > JWKS_MIN_REFRESH_MS) {
     await loadKeys();
     jwk = jwks.keys.find((k) => k.kid === kid && k.kty === 'RSA');
@@ -172,15 +187,19 @@ async function verifyIdToken(token) {
   const signatureOk = crypto.verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), key, Buffer.from(parts[2], 'base64url'));
   if (!signatureOk) throw authError('That sign-in could not be verified.');
 
-  const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  const now = Date.now();
   const verifiedEmail = claims.email_verified === true || claims.email_verified === 'true';
+  const provider = claims.firebase && claims.firebase.sign_in_provider;
   if (
-    !ISSUERS.includes(claims.iss) ||
-    !aud.includes(clientId()) ||
+    claims.iss !== `https://securetoken.google.com/${projectId()}` ||
+    claims.aud !== projectId() ||
     typeof claims.exp !== 'number' ||
-    claims.exp * 1000 < Date.now() - CLOCK_SKEW_MS ||
+    claims.exp * 1000 < now - CLOCK_SKEW_MS ||
+    (typeof claims.iat === 'number' && claims.iat * 1000 > now + CLOCK_SKEW_MS) ||
     typeof claims.sub !== 'string' ||
     !claims.sub ||
+    claims.sub.length > 128 ||
+    provider !== 'google.com' || // only Google accounts, even if the project allows other methods
     typeof claims.email !== 'string' ||
     !verifiedEmail
   ) {
@@ -218,7 +237,7 @@ async function handle(req, res, pathname) {
   const route = pathname.replace(/^\/api\/auth\//, '');
 
   if (route === 'config' && req.method === 'GET') {
-    return sendJson(res, 200, { enabled: isEnabled(), clientId: isEnabled() ? clientId() : null });
+    return sendJson(res, 200, { enabled: isEnabled(), firebase: isEnabled() ? firebaseConfig() : null });
   }
 
   if (route === 'me' && req.method === 'GET') {
