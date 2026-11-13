@@ -16,6 +16,8 @@ served by a small dependency-free Node.js server.
   monthly repeats, and links to a goal and a project. Import/export `.ics`
   files, and optionally sync two-way with Google Calendar (the Connect button on the Settings
   page; it uses the same Firebase sign-in, so there is nothing extra to set up).
+  Adding a task on the Tasks tab needs only a title; due date, priority,
+  repeat, goal and project sit under **More options**.
 - **Habits** — daily, weekdays, weekends, specific days, or once a week. Streaks
   respect the schedule, so off days never break them.
 - **Journal** — entries with a mood and tags, with a tag filter.
@@ -34,6 +36,11 @@ served by a small dependency-free Node.js server.
   means it has been a week since your last backup.
 - **Backup** — export/import all data as JSON (on the Settings page), with undo on deletes and
   automatic schema migrations.
+- **Install as an app** — on a phone or computer, add it to your home screen
+  or dock (Settings → Install the app, or Share → Add to Home Screen on an
+  iPhone). It opens in its own window and still works with no connection;
+  changes sync when you are back online. Offline support needs https (or
+  localhost), which Vercel and Azure both provide.
 - **Light and dark themes** — follows your system, or use the toggle in the
   header.
 - **Animated background** — a soft, slowly moving banner at the top of every page

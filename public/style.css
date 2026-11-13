@@ -481,6 +481,7 @@ select option {
     .google-actions button,
     .import-confirm-actions button,
     .money-form button,
+    .task-form-main button,
     .quick-add-btn,
     #goalPlanApply
   ) {
@@ -506,6 +507,7 @@ select option {
     .google-actions button,
     .import-confirm-actions button,
     .money-form button,
+    .task-form-main button,
     .quick-add-btn,
     #goalPlanApply
   ):hover {
@@ -2246,6 +2248,62 @@ html[data-bg="off"] .hero-canvas {
 
 html[data-bg="off"] .login-bg {
   background: var(--background);
+}
+
+/* ---------- Task form ---------- */
+.task-form {
+  margin-bottom: 1rem;
+}
+
+.task-form-main {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.task-form-main input {
+  flex: 1;
+  min-width: 0;
+}
+
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  padding: 0.2rem 0;
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  color: var(--foreground);
+}
+
+.link-btn::before {
+  content: '';
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+
+.link-btn[aria-expanded="true"]::before {
+  transform: rotate(45deg);
+}
+
+.link-btn-note {
+  color: var(--foreground);
+}
+
+.task-more {
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 /* ---------- Settings ---------- */

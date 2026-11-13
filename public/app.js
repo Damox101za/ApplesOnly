@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
   money: 'lifeTracker.money',
   theme: 'lifeTracker.theme',
   background: 'lifeTracker.background',
+  taskFormMore: 'lifeTracker.taskFormMore',
 };
 
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
@@ -1656,6 +1657,37 @@ function addTask(fields) {
   return task;
 }
 
+// The extra task fields stay tucked away until asked for; the choice is remembered.
+const taskMoreBtn = document.getElementById('taskMoreBtn');
+const taskMoreOptions = document.getElementById('taskMoreOptions');
+
+// How many extra fields differ from their defaults, so a collapsed form still says so.
+function updateTaskMoreNote() {
+  const set = [
+    document.getElementById('taskDate').value,
+    document.getElementById('taskPriority').value !== 'medium',
+    document.getElementById('taskRepeat').value,
+    document.getElementById('taskGoal').value,
+    document.getElementById('taskProject').value,
+  ].filter(Boolean).length;
+  document.getElementById('taskMoreNote').textContent = set && taskMoreOptions.hidden ? `· ${set} set` : '';
+}
+
+function setTaskMore(open) {
+  taskMoreOptions.hidden = !open;
+  taskMoreBtn.setAttribute('aria-expanded', String(open));
+  document.getElementById('taskMoreLabel').textContent = open ? 'Fewer options' : 'More options';
+  updateTaskMoreNote();
+}
+
+taskMoreBtn.addEventListener('click', () => {
+  const open = taskMoreOptions.hidden;
+  setTaskMore(open);
+  save(STORAGE_KEYS.taskFormMore, open);
+});
+taskMoreOptions.addEventListener('change', updateTaskMoreNote);
+setTaskMore(load(STORAGE_KEYS.taskFormMore, false) === true);
+
 document.getElementById('taskForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = document.getElementById('taskInput');
@@ -1683,6 +1715,7 @@ document.getElementById('taskForm').addEventListener('submit', (e) => {
   prioritySel.value = 'medium';
   goalSel.value = '';
   projectSel.value = '';
+  updateTaskMoreNote();
 });
 
 document.getElementById('taskList').addEventListener('click', (e) => {
@@ -3450,6 +3483,52 @@ bgToggle.addEventListener('click', () => {
   const on = document.documentElement.dataset.bg === 'off'; // flip
   applyBackground(on);
   save(STORAGE_KEYS.background, on ? 'on' : 'off');
+});
+
+// ---------- Install as an app ----------
+// The service worker keeps a copy of the app so it opens offline. Browsers only
+// allow one on https or localhost.
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  const registerWorker = () =>
+    navigator.serviceWorker.register('/sw.js').catch((err) => console.warn('Offline support unavailable:', err.message));
+  // sync.js loads this file late, often after 'load' has already fired.
+  if (document.readyState === 'complete') registerWorker();
+  else window.addEventListener('load', registerWorker);
+}
+
+const installCard = document.getElementById('installCard');
+const installBtn = document.getElementById('installBtn');
+const installHint = document.getElementById('installHint');
+let installPrompt = null;
+
+const runningInstalled =
+  (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+if (!runningInstalled && isIOS) {
+  // Safari on iPhone and iPad has no install button a page can trigger.
+  installHint.innerHTML = 'Tap the <strong>Share</strong> button in Safari, then <strong>Add to Home Screen</strong>. It opens full screen and works without a connection.';
+  installCard.hidden = false;
+}
+
+// Chrome, Edge and Android hand us a prompt we can show from our own button.
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  installBtn.hidden = false;
+  installCard.hidden = false;
+});
+
+installBtn.addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => null);
+  installPrompt = null;
+  installBtn.hidden = true;
+});
+
+window.addEventListener('appinstalled', () => {
+  installCard.hidden = true;
 });
 
 // ---------- Account (shown only when the server has Google sign-in on) ----------

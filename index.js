@@ -18,6 +18,8 @@ const mimeTypes = {
     '.ico': 'image/x-icon',
     '.svg': 'image/svg+xml',
     '.png': 'image/png',
+    '.webmanifest': 'application/manifest+json',
+    '.json': 'application/json',
 };
 
 function redirect(res, location) {
@@ -65,7 +67,10 @@ const server = http.createServer((req, res) => {
             res.writeHead(404);
             res.end('404 Not Found');
         } else {
-            res.writeHead(200, { 'Content-Type': contentType });
+            const headers = { 'Content-Type': contentType };
+            // The service worker must always be re-checked, or updates get stuck.
+            if (pathname === '/sw.js') headers['Cache-Control'] = 'no-cache';
+            res.writeHead(200, headers);
             res.end(content);
         }
     });
