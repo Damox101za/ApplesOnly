@@ -12,6 +12,9 @@ served by a small dependency-free Node.js server.
   `pay rent every month !high #goal @project` into a task. It understands
   dates (`tomorrow`, `next friday`, `dec 25`), repeats, priority, a goal
   (`#name`) and a project (`@name`), with a live preview.
+- **Search** — press `Ctrl+K` (`⌘K` on a Mac) or the magnifier in the header
+  to search tasks, habits, goals, projects, journal entries and tags, and to
+  jump to any page. Picking a result opens its page and highlights the item.
 - **Tasks** — list and kanban-board views, due dates, priority, daily / weekly /
   monthly repeats, and links to a goal and a project. Import/export `.ics`
   files, and optionally sync two-way with Google Calendar (the Connect button on the Settings

@@ -58,6 +58,7 @@
                 <button type="button" id="signOutBtn" class="secondary-btn">Sign out</button>
               </div>
             </div>
+            <button type="button" id="searchBtn" class="icon-btn" aria-label="Search (Ctrl+K)" title="Search (Ctrl+K)" aria-haspopup="dialog"></button>
             <button type="button" id="themeToggle" class="icon-btn" aria-label="Toggle theme"></button>
           </div>
         </header>
@@ -442,6 +443,17 @@
       </div>
     </div>
   </div>
+
+  <dialog class="search-dialog" id="searchDialog" aria-label="Search">
+    <div class="search-box">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input type="text" id="searchInput" enterkeyhint="go" placeholder="Search tasks, habits, journal, goals, projects…" autocomplete="off" spellcheck="false"
+        role="combobox" aria-expanded="true" aria-controls="searchResults" aria-autocomplete="list" aria-label="Search">
+      <kbd class="search-esc">Esc</kbd>
+    </div>
+    <ul class="search-results" id="searchResults" role="listbox" aria-label="Results"></ul>
+    <div class="search-foot" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span></div>
+  </dialog>
 
   <div class="toast" id="toast">
     <span class="toast-message"></span>
