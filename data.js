@@ -17,7 +17,7 @@ const { sendJson, sameOrigin, readJsonBody, closeAfterResponse } = require('./ht
 
 // What gets synced. Device-only settings (theme, background, view mode, backup
 // and Calendar timestamps) deliberately stay out.
-const ARRAY_KEYS = ['habits', 'journal', 'goals', 'tasks', 'projects'];
+const ARRAY_KEYS = ['habits', 'journal', 'goals', 'tasks', 'projects', 'expenses'];
 const OBJECT_KEYS = ['money', 'wheelRatings'];
 const KEYS = [...ARRAY_KEYS, ...OBJECT_KEYS, 'schemaVersion'];
 

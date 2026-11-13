@@ -30,8 +30,11 @@ served by a small dependency-free Node.js server.
 - **Life Wheel** — radar chart of 8 life areas scored 0–10. Tag habits with an
   area and the score comes from how often you did them in the last 30 days;
   areas without habits use a manual slider.
-- **Money** — a 50/30/20 budget split from your monthly income, a sinking-fund
-  calculator, and short budgeting guides.
+- **Money** — a 50/30/20 budget split from your monthly income, with spending
+  logged against it: add what you spent (amount, what for, needs / wants /
+  savings, date) and each part shows how much is left or how far over you are,
+  month by month. Plus a sinking-fund calculator and short budgeting guides.
+  Spending syncs, is encrypted, and is part of backups like everything else.
 - **Dashboard** — stats, a task-status breakdown, streak cards and a
   GitHub-style activity heatmap.
 - **Settings** — one place for theme, the animated background, Google

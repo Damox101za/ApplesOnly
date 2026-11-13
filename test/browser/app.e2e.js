@@ -217,6 +217,62 @@ test('password-protected backups: only the right password opens them', async (t)
   assert.equal(r.roundTrip, true);
 });
 
+test('spending: logged against the 50/30/20 budget, month by month', async (t) => {
+  const { page, problems } = await openApp(t);
+  await page.click('.tab-btn[data-tab="money"]');
+  await page.fill('#moneyIncome', '10000');
+  await page.fill('#moneyCurrency', 'R');
+  await page.click('#moneyForm button[type="submit"]');
+
+  const add = async (amount, note, category, date) => {
+    await page.fill('#expenseAmount', String(amount));
+    await page.fill('#expenseNote', note);
+    await page.selectOption('#expenseCategory', category);
+    if (date) await page.fill('#expenseDate', date);
+    await page.click('#expenseForm button[type="submit"]');
+  };
+  const today = await page.evaluate(() => todayKey());
+  await add(3000, 'Rent', 'needs', today);
+  await add(3500, 'Weekend away', 'wants', today); // over the 30% (R3,000) budget
+  await add(1000, 'Emergency fund', 'savings', today);
+
+  const rows = await page.locator('#moneyAllocation .money-row').allTextContents();
+  const flat = rows.map((r) => r.replace(/\s+/g, ' ').trim());
+  assert.match(flat[0], /Needs R3,000 of R5,000/);
+  assert.match(flat[0], /R2,000 left/);
+  assert.match(flat[1], /Wants R3,500 of R3,000/);
+  assert.match(flat[1], /R500 over budget/);
+  assert.match(flat[2], /R1,000 of R2,000/);
+  assert.match(await page.textContent('#spendSummary'), /Spent R7,500 of R10,000 · R2,500 left/);
+  assert.equal(await page.locator('#moneyAllocation .progress-fill.over').count(), 1, 'only Wants is over');
+  assert.equal(await page.locator('#expenseList .item-card').count(), 3);
+
+  // An entry in an earlier month goes to that month, not this one.
+  const lastMonth = await page.evaluate(() => shiftMonth(monthKey(new Date()), -1));
+  await add(200, 'Old groceries', 'needs', `${lastMonth}-15`);
+  assert.equal(await page.textContent('#spendMonthLabel'), await page.evaluate((m) => monthLabel(m), lastMonth));
+  assert.equal(await page.locator('#expenseList .item-card').count(), 1);
+  await page.click('#spendNext');
+  assert.equal(await page.locator('#expenseList .item-card').count(), 3);
+  assert.equal(await page.isDisabled('#spendNext'), true, "can't page into the future");
+
+  // Delete with undo.
+  await page.locator('#expenseList [data-delete-expense]').first().click();
+  assert.equal(await page.locator('#expenseList .item-card').count(), 2);
+  await page.click('.toast-undo');
+  assert.equal(await page.locator('#expenseList .item-card').count(), 3);
+
+  // Saved, and part of backups and search.
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('lifeTracker.expenses')).length);
+  assert.equal(stored, 4);
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('weekend');
+  assert.match(await page.locator('.search-hit').first().textContent(), /Weekend away/);
+  await page.keyboard.press('Escape');
+
+  assert.deepEqual(problems, []);
+});
+
 test('click-through: add, search, every page, no CSP violations or errors', async (t) => {
   const { page, problems } = await openApp(t);
 

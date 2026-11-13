@@ -90,6 +90,7 @@ test('data api: saves, conflicts and validation', async (t) => {
   assert.equal(first.status, 200);
   assert.equal(first.json.rev, 0);
   assert.ok(first.json.keys.includes('tasks'));
+  assert.ok(first.json.keys.includes('expenses'), 'spending syncs too');
 
   const saved = await api(srv.base, alice, { method: 'PUT', body: { baseRev: 0, data: { tasks: [{ id: 't1', title: 'Pay rent' }] } } });
   assert.deepEqual(saved, { status: 200, json: { rev: 1 } });
