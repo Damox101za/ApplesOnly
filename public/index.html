@@ -335,6 +335,10 @@
                   <span>Date</span>
                   <input type="date" id="expenseDate" required>
                 </label>
+                <label class="field field-xs">
+                  <span>Time <span class="optional">(optional)</span></span>
+                  <input type="time" id="expenseTime">
+                </label>
                 <button type="submit">Add</button>
               </form>
               <div class="spend-import-row">
@@ -345,6 +349,32 @@
                 <span class="item-meta">Bank statements or your own sheets, in any column order. Read on this device, never uploaded.</span>
               </div>
               <ul class="item-list expense-list" id="expenseList"></ul>
+            </div>
+
+            <div class="card" id="spendTrendCard">
+              <header class="card-head">
+                <div class="card-title"><span>Spending over time</span></div>
+                <div class="view-toggle trend-range" role="group" aria-label="How many months">
+                  <button type="button" class="view-toggle-btn" data-months="6">6 months</button>
+                  <button type="button" class="view-toggle-btn" data-months="12">12 months</button>
+                </div>
+              </header>
+              <div class="trend-legend" id="spendTrendLegend"></div>
+              <div class="trend-chart" id="spendTrendChart"></div>
+              <div class="trend-tooltip" id="spendTrendTip" role="status" hidden></div>
+              <details class="trend-table-wrap">
+                <summary>Show as a table</summary>
+                <div class="table-scroll"><table class="trend-table" id="spendTrendTable"></table></div>
+              </details>
+            </div>
+
+            <div class="card" id="spendPlacesCard">
+              <header class="card-head">
+                <div class="card-title"><span>Where it went</span></div>
+                <span class="item-meta" id="spendPlacesMonth"></span>
+              </header>
+              <ul class="place-list" id="spendPlaces"></ul>
+              <button type="button" class="link-btn" id="spendPlacesMore" hidden></button>
             </div>
 
             <div class="card">
@@ -547,6 +577,7 @@
         <summary>Which column is which? <span class="item-meta" id="spendImportMapHint"></span></summary>
         <div class="import-map-grid">
           <label class="field"><span>Date</span><select id="mapDate"></select></label>
+          <label class="field"><span>Time (optional)</span><select id="mapTime"></select></label>
           <label class="field"><span>Description</span><select id="mapDescription"></select></label>
           <label class="field"><span>Amount</span><select id="mapAmount"></select></label>
           <label class="field"><span>Money out</span><select id="mapDebit"></select></label>

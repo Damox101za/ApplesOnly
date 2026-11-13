@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   projects: 'lifeTracker.projects',
   money: 'lifeTracker.money',
   expenses: 'lifeTracker.expenses',
+  spendTrendMonths: 'lifeTracker.spendTrendMonths',
   theme: 'lifeTracker.theme',
   background: 'lifeTracker.background',
   taskFormMore: 'lifeTracker.taskFormMore',
@@ -181,12 +182,13 @@ let { habits, journal, goals, tasks, projects } = loadAndMigrate();
 let money = load(STORAGE_KEYS.money, {});
 let expenses = loadExpenses();
 
-// Spending entries: { id, amount, note, category: needs|wants|savings, date: YYYY-MM-DD, createdAt }.
+// Spending entries: { id, amount, note, category: needs|wants|savings, date: YYYY-MM-DD, time?: HH:MM, createdAt }.
 function loadExpenses() {
   const list = load(STORAGE_KEYS.expenses, []);
-  return Array.isArray(list)
-    ? list.filter((e) => e && typeof e.amount === 'number' && e.amount > 0 && /^\d{4}-\d{2}-\d{2}$/.test(e.date))
-    : [];
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((e) => e && typeof e.amount === 'number' && e.amount > 0 && /^\d{4}-\d{2}-\d{2}$/.test(e.date))
+    .map((e) => (e.time && !/^\d{2}:\d{2}$/.test(e.time) ? { ...e, time: null } : e));
 }
 
 // Set once everything is defined; the page banner reads data declared further down.
@@ -3417,6 +3419,8 @@ function renderMoney() {
   }).join('');
 
   renderExpenseList();
+  renderPlaces();
+  renderTrend();
   renderSinkingFund();
   renderBanner();
 }
@@ -3449,23 +3453,274 @@ function renderExpenseList() {
   const list = document.getElementById('expenseList');
   const rows = expenses
     .filter((e) => e.date.startsWith(spendMonth))
-    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
-  list.innerHTML = rows.length
-    ? rows
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.time || '').localeCompare(a.time || '') || b.createdAt - a.createdAt);
+  if (!rows.length) {
+    list.innerHTML = `<li class="empty-state">No spending logged for ${escapeHtml(monthLabel(spendMonth))}.</li>`;
+    return;
+  }
+  // Grouped by day, each day with its total.
+  const days = [];
+  rows.forEach((e) => {
+    if (!days.length || days[days.length - 1].date !== e.date) days.push({ date: e.date, items: [] });
+    days[days.length - 1].items.push(e);
+  });
+  list.innerHTML = days
+    .map((day) => {
+      const total = day.items.reduce((sum, e) => sum + e.amount, 0);
+      const label = new Date(`${day.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+      return `
+      <li class="expense-day">
+        <span>${escapeHtml(label)}</span>
+        <span class="expense-day-total">${escapeHtml(fmtMoneyExact(Math.round(total * 100) / 100))}${day.items.length > 1 ? ` <span class="item-meta">· ${day.items.length} entries</span>` : ''}</span>
+      </li>
+      ${day.items
         .map(
           (e) => `
       <li class="item-card" data-id="${escapeHtml(e.id)}">
         <div class="item-main">
           <div class="item-title">${escapeHtml(e.note || CATEGORY_LABELS[e.category])}</div>
-          <div class="item-meta"><span class="spend-chip spend-${escapeHtml(e.category)}">${escapeHtml(CATEGORY_LABELS[e.category] || '')}</span>
-            ${escapeHtml(new Date(`${e.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }))}</div>
+          <div class="item-meta"><span class="spend-chip spend-${escapeHtml(e.category)}">${escapeHtml(CATEGORY_LABELS[e.category] || '')}</span>${e.time ? escapeHtml(e.time) : ''}</div>
         </div>
         <div class="expense-amount">${escapeHtml(fmtMoneyExact(e.amount))}</div>
         <button type="button" class="icon-btn small" data-delete-expense="${escapeHtml(e.id)}" aria-label="Delete">✕</button>
       </li>`
         )
-        .join('')
-    : `<li class="empty-state">No spending logged for ${escapeHtml(monthLabel(spendMonth))}.</li>`;
+        .join('')}`;
+    })
+    .join('');
+}
+
+// ---------- Where it went: totals by place ----------
+let placesShowAll = false;
+const PLACES_SHOWN = 8;
+
+function renderPlaces() {
+  const list = document.getElementById('spendPlaces');
+  const more = document.getElementById('spendPlacesMore');
+  document.getElementById('spendPlacesMonth').textContent = monthLabel(spendMonth);
+  const month = expenses.filter((e) => e.date.startsWith(spendMonth));
+  const total = month.reduce((sum, e) => sum + e.amount, 0);
+  const places = new Map();
+  month.forEach((e) => {
+    const name = (window.SpendingImport && SpendingImport.merchantName(e.note)) || e.note || CATEGORY_LABELS[e.category];
+    const key = name.toLowerCase();
+    const p = places.get(key) || { name, total: 0, count: 0, byCat: { needs: 0, wants: 0, savings: 0 } };
+    p.total += e.amount;
+    p.count++;
+    p.byCat[e.category] = (p.byCat[e.category] || 0) + e.amount;
+    places.set(key, p);
+  });
+  const sorted = [...places.values()].sort((a, b) => b.total - a.total);
+  if (!sorted.length) {
+    list.innerHTML = '<li class="empty-state">Nothing logged this month yet.</li>';
+    more.hidden = true;
+    return;
+  }
+  const shown = placesShowAll ? sorted : sorted.slice(0, PLACES_SHOWN);
+  const top = sorted[0].total;
+  list.innerHTML = shown
+    .map((p) => {
+      const cat = Object.entries(p.byCat).sort((a, b) => b[1] - a[1])[0][0];
+      const share = total ? Math.round((p.total / total) * 100) : 0;
+      return `<li class="place-row">
+        <div class="place-head">
+          <span class="place-name">${escapeHtml(p.name)}</span>
+          <span class="place-total">${escapeHtml(fmtMoneyExact(Math.round(p.total * 100) / 100))}</span>
+        </div>
+        <div class="place-bar-track"><div class="place-bar spend-fill-${cat}" style="width:${Math.max(2, (p.total / top) * 100)}%"></div></div>
+        <div class="item-meta">${p.count} ${p.count === 1 ? 'time' : 'times'} · ${share}% of the month · <span class="spend-chip spend-${cat}">${escapeHtml(CATEGORY_LABELS[cat])}</span></div>
+      </li>`;
+    })
+    .join('');
+  more.hidden = sorted.length <= PLACES_SHOWN;
+  more.textContent = placesShowAll ? 'Show fewer' : `Show all ${sorted.length} places`;
+}
+
+document.getElementById('spendPlacesMore').addEventListener('click', () => {
+  placesShowAll = !placesShowAll;
+  renderPlaces();
+});
+
+// ---------- Spending over time: monthly totals, stacked by budget part ----------
+let trendMonths = Number(load(STORAGE_KEYS.spendTrendMonths, 6)) === 12 ? 12 : 6;
+const TREND_PARTS = ['needs', 'wants', 'savings'];
+
+function trendData() {
+  const now = monthKey(new Date());
+  const months = [];
+  for (let i = trendMonths - 1; i >= 0; i--) months.push(shiftMonth(now, -i));
+  return months.map((m) => {
+    const parts = spendingByCategory(m);
+    return { month: m, ...parts, total: parts.needs + parts.wants + parts.savings };
+  });
+}
+
+// A round axis top just above v (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 or 10 times a power of ten),
+// so the tallest bar uses most of the height.
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = 10 ** Math.floor(Math.log10(v));
+  return [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map((m) => m * p).find((m) => m >= v - 1e-9);
+}
+
+function shortMoney(n) {
+  const c = moneyCurrency();
+  if (n >= 1e6) return `${c}${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}m`;
+  if (n >= 1e3) return `${c}${(n / 1e3).toFixed(n % 1e3 ? 1 : 0)}k`;
+  return `${c}${Math.round(n)}`;
+}
+
+function renderTrend() {
+  const chart = document.getElementById('spendTrendChart');
+  const data = trendData();
+  document.querySelectorAll('.trend-range .view-toggle-btn').forEach((b) => b.classList.toggle('active', Number(b.dataset.months) === trendMonths));
+  const income = moneyIncome();
+  document.getElementById('spendTrendLegend').innerHTML =
+    TREND_PARTS.map((k) => `<span class="legend-item"><span class="legend-swatch spend-fill-${k}"></span>${escapeHtml(CATEGORY_LABELS[k])}</span>`).join('') +
+    (income ? '<span class="legend-item"><span class="legend-line"></span>Income</span>' : '');
+
+  const table = document.getElementById('spendTrendTable');
+  table.innerHTML =
+    `<thead><tr><th>Month</th>${TREND_PARTS.map((k) => `<th class="num">${escapeHtml(CATEGORY_LABELS[k])}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>` +
+    data
+      .slice()
+      .reverse()
+      .map((d) => `<tr><td>${escapeHtml(monthLabel(d.month))}</td>${TREND_PARTS.map((k) => `<td class="num">${escapeHtml(fmtMoney(d[k]))}</td>`).join('')}<td class="num"><strong>${escapeHtml(fmtMoney(d.total))}</strong></td></tr>`)
+      .join('') +
+    '</tbody>';
+
+  if (!data.some((d) => d.total > 0)) {
+    chart.innerHTML = '<p class="empty-state">Log or import spending to see it month by month.</p>';
+    return;
+  }
+
+  const W = Math.max(280, chart.clientWidth || 600);
+  const H = 220;
+  const m = { top: 14, right: 8, bottom: 26, left: 46 };
+  const plotW = W - m.left - m.right;
+  const plotH = H - m.top - m.bottom;
+  const max = niceMax(Math.max(income, ...data.map((d) => d.total)) * 1.05);
+  const y = (v) => m.top + plotH - (v / max) * plotH;
+  const band = plotW / data.length;
+  const barW = Math.min(44, band * 0.62);
+  const ticks = [0, max / 2, max];
+  const now = monthKey(new Date());
+
+  const grid = ticks
+    .map((t) => `<line class="trend-grid" x1="${m.left}" x2="${W - m.right}" y1="${y(t)}" y2="${y(t)}"/>
+      <text class="trend-axis" x="${m.left - 6}" y="${y(t) + 4}" text-anchor="end">${escapeHtml(shortMoney(t))}</text>`)
+    .join('');
+
+  // Rounded top on the highest segment only; segments separated by a 2px gap.
+  const roundTop = (x, top, w, h, r) => {
+    r = Math.min(r, h, w / 2);
+    return `M${x},${top + h}V${top + r}Q${x},${top} ${x + r},${top}H${x + w - r}Q${x + w},${top} ${x + w},${top + r}V${top + h}Z`;
+  };
+  const bars = data
+    .map((d, i) => {
+      const x = m.left + band * i + (band - barW) / 2;
+      let base = d.total;
+      const parts = TREND_PARTS.filter((k) => d[k] > 0);
+      const segs = parts
+        .slice()
+        .reverse()
+        .map((k, j) => {
+          const top = y(base);
+          const h = Math.max(1, y(base - d[k]) - top - (j < parts.length - 1 ? 2 : 0));
+          base -= d[k];
+          return j === 0
+            ? `<path class="spend-fill-${k}" d="${roundTop(x, top, barW, h, 4)}"/>`
+            : `<rect class="spend-fill-${k}" x="${x}" y="${top + 2}" width="${barW}" height="${Math.max(0, h - 2)}"/>`;
+        })
+        .join('');
+      const label = new Date(`${d.month}-01T00:00:00`).toLocaleDateString(undefined, { month: 'short' });
+      const selected = d.month === spendMonth;
+      const summary = `${monthLabel(d.month)}: ${fmtMoney(d.total)} spent`;
+      return `<g class="trend-month${selected ? ' selected' : ''}">
+        ${selected ? `<rect class="trend-selected" x="${m.left + band * i + 2}" y="${m.top}" width="${band - 4}" height="${plotH}" rx="6"/>` : ''}
+        ${segs}
+        <text class="trend-axis trend-month-label" x="${x + barW / 2}" y="${H - 8}" text-anchor="middle">${escapeHtml(label)}${d.month.slice(0, 4) !== now.slice(0, 4) && (i === 0 || d.month.endsWith('-01')) ? ` ’${d.month.slice(2, 4)}` : ''}</text>
+        <rect class="trend-hit" data-month="${d.month}" x="${m.left + band * i}" y="${m.top}" width="${band}" height="${plotH + m.bottom}"
+          tabindex="0" role="button" aria-label="${escapeHtml(summary)}. Show this month."/>
+      </g>`;
+    })
+    .join('');
+
+  const incomeLine = income && income <= max
+    ? `<line class="trend-income" x1="${m.left}" x2="${W - m.right}" y1="${y(income)}" y2="${y(income)}"/>
+       <text class="trend-axis" x="${W - m.right}" y="${y(income) - 5}" text-anchor="end">Income ${escapeHtml(shortMoney(income))}</text>`
+    : '';
+
+  chart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img"
+      aria-label="Spending per month for the last ${trendMonths} months, split into needs, wants and savings. The table below has the numbers.">
+      ${grid}${bars}${incomeLine}</svg>`;
+}
+
+function showTrendTip(month, anchor) {
+  const tip = document.getElementById('spendTrendTip');
+  const d = trendData().find((x) => x.month === month);
+  if (!d) return;
+  const income = moneyIncome();
+  tip.innerHTML =
+    `<div class="trend-tip-title">${escapeHtml(monthLabel(month))}</div>` +
+    TREND_PARTS.map((k) => `<div class="trend-tip-row"><span><span class="legend-swatch spend-fill-${k}"></span>${escapeHtml(CATEGORY_LABELS[k])}</span><span>${escapeHtml(fmtMoney(d[k]))}</span></div>`).join('') +
+    `<div class="trend-tip-row trend-tip-total"><span>Total</span><span>${escapeHtml(fmtMoney(d.total))}</span></div>` +
+    (income ? `<div class="item-meta">${d.total > income ? `${escapeHtml(fmtMoney(d.total - income))} more than income` : `${escapeHtml(fmtMoney(income - d.total))} left of income`}</div>` : '');
+  tip.hidden = false;
+  // Beside the month (right of it, or left near the edge), level with the top of the plot.
+  const card = document.getElementById('spendTrendCard').getBoundingClientRect();
+  const plot = document.getElementById('spendTrendChart').getBoundingClientRect();
+  const r = anchor.getBoundingClientRect();
+  const right = r.right - card.left + 6;
+  const left = right + tip.offsetWidth > card.width - 8 ? r.left - card.left - tip.offsetWidth - 6 : right;
+  tip.style.left = `${Math.max(8, left)}px`;
+  tip.style.top = `${plot.top - card.top + 8}px`;
+}
+
+const trendChart = document.getElementById('spendTrendChart');
+trendChart.addEventListener('pointerover', (e) => {
+  const hit = e.target.closest('.trend-hit');
+  if (hit) showTrendTip(hit.dataset.month, hit);
+});
+trendChart.addEventListener('focusin', (e) => {
+  const hit = e.target.closest('.trend-hit');
+  if (hit) showTrendTip(hit.dataset.month, hit);
+});
+trendChart.addEventListener('pointerleave', () => (document.getElementById('spendTrendTip').hidden = true));
+trendChart.addEventListener('focusout', () => (document.getElementById('spendTrendTip').hidden = true));
+const pickTrendMonth = (month) => {
+  spendMonth = month;
+  renderMoney();
+  document.getElementById('spendingCard').scrollIntoView({ block: 'start', behavior: 'smooth' });
+};
+trendChart.addEventListener('click', (e) => {
+  const hit = e.target.closest('.trend-hit');
+  if (hit) pickTrendMonth(hit.dataset.month);
+});
+trendChart.addEventListener('keydown', (e) => {
+  const hit = e.target.closest('.trend-hit');
+  if (hit && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    pickTrendMonth(hit.dataset.month);
+  }
+});
+document.querySelector('.trend-range').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-months]');
+  if (!btn) return;
+  trendMonths = Number(btn.dataset.months);
+  save(STORAGE_KEYS.spendTrendMonths, trendMonths);
+  renderTrend();
+});
+// Redraw at the new width when the card resizes (sidebar, phone rotation...).
+if (window.ResizeObserver) {
+  let lastWidth = 0;
+  new ResizeObserver(([entry]) => {
+    const w = Math.round(entry.contentRect.width);
+    if (w && Math.abs(w - lastWidth) > 4) {
+      lastWidth = w;
+      renderTrend();
+    }
+  }).observe(trendChart);
 }
 
 // Amounts in the list keep their cents; budget totals round to whole units.
@@ -3485,18 +3740,21 @@ document.getElementById('expenseForm').addEventListener('submit', (e) => {
     return;
   }
   const category = document.getElementById('expenseCategory').value;
+  const time = document.getElementById('expenseTime').value;
   expenses.push({
     id: uid(),
     amount,
     note: document.getElementById('expenseNote').value.trim().slice(0, 80),
     category: CATEGORY_LABELS[category] ? category : 'needs',
     date,
+    time: /^\d{2}:\d{2}$/.test(time) ? time : null,
     createdAt: Date.now(),
   });
   save(STORAGE_KEYS.expenses, expenses);
   spendMonth = date.slice(0, 7); // show the month it went into
   amountInput.value = '';
   document.getElementById('expenseNote').value = '';
+  document.getElementById('expenseTime').value = '';
   renderMoney();
   amountInput.focus();
 });
@@ -3512,7 +3770,7 @@ document.getElementById('expenseList').addEventListener('click', (e) => {
 const importDialog = document.getElementById('spendImportDialog');
 let spendImport = null; // { name, analysis, columns, order, spending, overrides: Map(row -> { include, category }), result }
 
-const MAP_FIELDS = { mapDate: 'date', mapDescription: 'description', mapAmount: 'amount', mapDebit: 'debit', mapCredit: 'credit', mapCategory: 'category' };
+const MAP_FIELDS = { mapDate: 'date', mapTime: 'time', mapDescription: 'description', mapAmount: 'amount', mapDebit: 'debit', mapCredit: 'credit', mapCategory: 'category' };
 const MAX_IMPORT_BYTES = 15 * 1024 * 1024;
 
 async function openSpendImport(file) {
@@ -3581,7 +3839,7 @@ function renderSpendImport() {
       const cat = o.category || e.category;
       return `<tr class="${include ? '' : 'excluded'}" data-row="${e.row}">
         <td><input type="checkbox" data-include ${include ? 'checked' : ''} aria-label="Import this row"></td>
-        <td class="nowrap">${escapeHtml(shortDate(e.date))}</td>
+        <td class="nowrap">${escapeHtml(shortDate(e.date))}${e.time ? ` <span class="item-meta">${escapeHtml(e.time)}</span>` : ''}</td>
         <td>${escapeHtml(e.note || '—')}${e.duplicate ? ' <span class="import-flag">already logged</span>' : ''}</td>
         <td class="num">${escapeHtml(fmtMoneyExact(e.amount))}</td>
         <td><select data-category class="${e.guessed && !o.category ? 'guessed' : ''}" aria-label="Part of budget">
@@ -3698,6 +3956,7 @@ document.getElementById('spendImportGo').addEventListener('click', () => {
     note: e.note,
     category: CATEGORY_LABELS[e.category] ? e.category : 'needs',
     date: e.date,
+    time: e.time || null,
     createdAt: now + i,
   }));
   if (window.CloudSync && CloudSync.isEnabled()) CloudSync.keepVersionBeforeNextSave();
@@ -4135,7 +4394,7 @@ function searchIndex() {
     })),
     ...[...expenses].sort((a, b) => b.date.localeCompare(a.date)).map((x) => ({
       kind: 'Spending', tab: 'money', id: x.id, icon: 'wallet', title: x.note || CATEGORY_LABELS[x.category],
-      meta: `${fmtMoneyExact(x.amount)} · ${CATEGORY_LABELS[x.category]} · ${x.date}`,
+      meta: `${fmtMoneyExact(x.amount)} · ${CATEGORY_LABELS[x.category]} · ${x.date}${x.time ? ` ${x.time}` : ''}`,
       text: `${x.note} ${CATEGORY_LABELS[x.category]}`, month: x.date.slice(0, 7),
     })),
     ...pages,

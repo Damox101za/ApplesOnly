@@ -107,7 +107,7 @@ test('sorting into needs, wants and savings', () => {
 test('bank statement: preamble lines, signed amounts, balance column ignored', async () => {
   const { a, entries, skipped } = await importFile('bank-statement.csv');
   assert.equal(a.headerRow, 3, 'the header is found below three lines of account details');
-  assert.deepEqual(a.columns, { date: 0, amount: 1, debit: -1, credit: -1, description: 3, category: -1 });
+  assert.deepEqual(a.columns, { date: 0, time: -1, amount: 1, debit: -1, credit: -1, description: 3, category: -1 });
   assert.equal(a.spending, 'negative');
   assert.equal(skipped.income, 1, 'the salary is money in, not spending');
   assert.deepEqual(summary(entries), [
@@ -125,7 +125,7 @@ test('bank statement: preamble lines, signed amounts, balance column ignored', a
 
 test('semicolons, decimal commas, money in/out columns, date column last', async () => {
   const { a, entries, skipped } = await importFile('money-in-out.csv');
-  assert.deepEqual(a.columns, { date: 4, amount: -1, debit: 2, credit: 1, description: 0, category: -1 });
+  assert.deepEqual(a.columns, { date: 4, time: -1, amount: -1, debit: 2, credit: 1, description: 0, category: -1 });
   assert.deepEqual(summary(entries), [
     ['2026-11-13', 1234.56, 'needs', 'Woolworths Food'],
     ['2026-11-10', 99, 'wants', 'Showmax subscription'],
@@ -148,7 +148,7 @@ test('no header row at all', async () => {
 
 test('Excel: title row, real date cells, own category column, extra sheet', async () => {
   const { a, entries } = await importFile('budget.xlsx');
-  assert.deepEqual(a.columns, { date: 3, amount: 2, debit: -1, credit: -1, description: 0, category: 1 });
+  assert.deepEqual(a.columns, { date: 3, time: -1, amount: 2, debit: -1, credit: -1, description: 0, category: 1 });
   assert.deepEqual(summary(entries), [
     ['2026-11-07', 650.5, 'wants', 'Dinner out & drinks'],
     ['2026-11-03', 900, 'needs', 'Electricity'],
@@ -183,4 +183,57 @@ test('old .xls and broken files give a clear message', async () => {
 test('excel serial dates', () => {
   assert.equal(S.excelSerialToISO(46339), '2026-11-13');
   assert.equal(S.excelSerialToISO(44877, true), '2026-11-13', '1904 date system');
+});
+
+test('times: on their own, at the end of a date, or as an Excel fraction', () => {
+  const cases = {
+    '14:05': '14:05',
+    '2:05 pm': '14:05',
+    '12:30 AM': '00:30',
+    '14h05': '14:05',
+    '13/11/2026 14:05': '14:05',
+    '2026-11-13T10:22:00Z': '10:22',
+    '0.5': '12:00',
+  };
+  for (const [raw, want] of Object.entries(cases)) assert.equal(S.parseTime(raw), want, raw);
+  for (const raw of ['13/11/2026', '25:00', '13:00 pm', 'hello', '']) assert.equal(S.parseTime(raw), null, raw);
+});
+
+test('a separate time column is used, and blank times stay blank', async () => {
+  const { a, entries } = await importFile('with-times.csv');
+  assert.equal(a.columns.time, 1);
+  assert.deepEqual(entries.map((e) => [e.date, e.time, e.note]), [
+    ['2026-11-13', '14:05', 'Woolworths Food'],
+    ['2026-11-13', '09:15', 'Vida e Caffe'],
+    ['2026-11-12', null, 'Spotify'],
+  ], 'newest first, by time within a day');
+});
+
+test('Excel date-time cells keep the time; midnight means no time', async () => {
+  const { entries } = await importFile('datetimes.xlsx');
+  assert.deepEqual(entries.map((e) => [e.date, e.time, e.note]), [
+    ['2026-11-13', '14:05', 'Checkers'],
+    ['2026-11-12', null, 'Rent'],
+  ]);
+});
+
+test('a time inside the date cell is picked up too', () => {
+  const rows = S.parseCSV('Date,Description,Amount\n13/11/2026 18:45,Uber Eats,-120\n');
+  const a = S.analyse(rows);
+  const { entries } = S.buildEntries(a.data, a.columns, { dateOrder: a.dateOrder, spending: a.spending });
+  assert.deepEqual([entries[0].date, entries[0].time], ['2026-11-13', '18:45']);
+});
+
+test('one name per place, whatever the bank wrapped around it', () => {
+  const cases = {
+    'POS PURCHASE CHECKERS HYPER, CAPE TOWN': 'Checkers Hyper',
+    'Checkers Hyper': 'Checkers Hyper',
+    'CARD PURCHASE ENGEN GARAGE N1 4412********1234': 'Engen Garage N1',
+    'DEBIT ORDER RENT NOVEMBER': 'Rent',
+    'Payment to John Smith - ref 1234': 'John Smith',
+    'EFT PAYMENT TO BODY CORPORATE 13/11': 'Body Corporate',
+    'NETFLIX.COM': 'Netflix.com',
+    'Woolworths Food': 'Woolworths Food',
+  };
+  for (const [raw, want] of Object.entries(cases)) assert.equal(S.merchantName(raw), want, raw);
 });

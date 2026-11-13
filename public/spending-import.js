@@ -156,7 +156,13 @@
         else if (v) {
           value = xmlDecode(v[1]);
           if ((!type || type === 'n') && dateStyles.has(style) && /^-?\d+(\.\d+)?$/.test(value)) {
-            value = excelSerialToISO(Number(value), date1904) || value;
+            const serial = Number(value);
+            const day = excelSerialToISO(serial, date1904);
+            if (day) {
+              // A fraction of a day is the time of day: 0.5 is 12:00.
+              const minutes = Math.round((serial - Math.floor(serial)) * 1440) % 1440;
+              value = minutes ? `${day} ${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}` : day;
+            }
           }
         }
         cells[col] = value.trim();
@@ -350,6 +356,30 @@
     return null;
   }
 
+  // 'HH:MM' (24-hour) from a time on its own ("14:05", "2:05 pm", "14h05") or at
+  // the end of a date ("13/11/2026 14:05", "2026-11-13T14:05:00Z"), else null.
+  // A time cell from Excel ("0.5868") is a fraction of a day.
+  function parseTime(raw) {
+    const s = String(raw === undefined || raw === null ? '' : raw).trim().toLowerCase();
+    if (!s) return null;
+    if (/^0?\.\d+$/.test(s)) {
+      const minutes = Math.round(Number(s) * 1440) % 1440;
+      return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+    }
+    const m = /(?:^|[t\s])(\d{1,2})[:h](\d{2})(?::\d{2}(?:\.\d+)?)?\s*(am|pm|a\.m\.|p\.m\.)?\s*(?:z|[+-]\d{2}:?\d{2})?$/.exec(s);
+    if (!m) return null;
+    let h = Number(m[1]);
+    const min = Number(m[2]);
+    const ampm = m[3] && m[3][0];
+    if (ampm) {
+      if (h < 1 || h > 12) return null;
+      if (ampm === 'p' && h < 12) h += 12;
+      if (ampm === 'a' && h === 12) h = 0;
+    }
+    if (h > 23 || min > 59) return null;
+    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+  }
+
   // For a column of dates like 03/04/2026: does any value prove the order?
   function detectDateOrder(values, fallback = 'dmy') {
     let dmy = 0;
@@ -374,6 +404,7 @@
     balance: /\b(balance|saldo|running)\b/i,
     description: /\b(desc|description|details?|narrative|narration|merchant|payee|reference|memo|particulars|transaction|item|name|note|notes|what|vendor|store|shop)\b/i,
     category: /\b(categor(y|ies)|type|budget|group|class|tag)\b/i,
+    time: /\b(time|tyd|hour)\b/i,
   };
 
   function headerScore(row) {
@@ -429,7 +460,7 @@
     const width = Math.max(header.length, ...data.slice(0, 200).map((r) => r.length), 0);
     const sample = data.slice(0, 300);
     const stats = Array.from({ length: width }, (_, c) => columnStats(sample, c));
-    const map = { date: -1, amount: -1, debit: -1, credit: -1, description: -1, category: -1 };
+    const map = { date: -1, time: -1, amount: -1, debit: -1, credit: -1, description: -1, category: -1 };
     const used = new Set();
     const take = (key, col) => {
       if (col >= 0 && !used.has(col)) {
@@ -445,6 +476,11 @@
       if (h && HEADER_PATTERNS.balance.test(h)) used.add(c);
     });
     take('date', named(HEADER_PATTERNS.date, (c) => stats[c] && stats[c].dateRatio >= 0.5));
+    // A separate time column ("Time", "Transaction time"), when the date column doesn't carry the time.
+    take('time', named(HEADER_PATTERNS.time, (c) => {
+      const filled = sample.filter((r) => r[c]);
+      return filled.length > 0 && filled.filter((r) => parseTime(r[c])).length / filled.length >= 0.6;
+    }));
     take('debit', named(HEADER_PATTERNS.debit, numeric));
     take('credit', named(HEADER_PATTERNS.credit, numeric));
     if (map.debit < 0 || map.credit < 0) {
@@ -540,6 +576,29 @@
     return { category: found || 'needs', guessed: !found };
   }
 
+  // ---------- Places ----------
+  // One name per shop, whatever the bank wrapped around it:
+  // "POS PURCHASE CHECKERS HYPER, CAPE TOWN 4412********1234" -> "Checkers Hyper".
+  const NOISE_PREFIX = /^(pos|card|cash|debit|credit|online|recurring|scheduled|internet|cellphone|app|eft|ibank)?\s*(purchase|payment|pmt|order|debit order|transfer|trf|withdrawal|card purchase|pos purchase|debit|charge|txn|transaction)?\s*(to|at|from|-)?\s+/i;
+  function merchantName(note) {
+    let t = String(note || '').replace(/\s+/g, ' ').trim();
+    if (!t) return '';
+    for (let i = 0; i < 3; i++) t = t.replace(NOISE_PREFIX, '').trim(); // "POS PURCHASE" then "DEBIT ORDER"...
+    t = t.split(/\s*[,;|]\s*|\s+-\s+|\s{2,}/)[0]; // drop ", CAPE TOWN" / " - ref" tails
+    t = t
+      .replace(/\b[\d*xX#]{4,}\b/g, '') // card and reference numbers
+      .replace(/\b\d{1,2}[/.-]\d{1,2}([/.-]\d{2,4})?\b/g, '') // dates
+      .replace(/\b(ref|reference|inv|invoice|no)\b\.?\s*\S*$/i, '')
+      .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\b\.?(\s+\d{2,4})?\s*$/i, '') // "RENT NOVEMBER" 
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[.,:;-]+$/, '');
+    if (!t) return String(note).trim().slice(0, 40);
+    // Title-case shouty bank text; leave mixed case the person typed alone.
+    if (t === t.toUpperCase()) t = t.toLowerCase().replace(/(^|[\s'(&/-])([a-z])/g, (m, a, b) => a + b.toUpperCase());
+    return t.slice(0, 40);
+  }
+
   // ---------- Putting it together ----------
   // Reads a File (CSV or .xlsx) into rows.
   async function readFile(file) {
@@ -619,15 +678,16 @@
         skipped.zero++;
         return;
       }
+      const time = (columns.time >= 0 && parseTime(row[columns.time])) || (columns.date >= 0 && parseTime(row[columns.date])) || null;
       const note = (columns.description >= 0 ? row[columns.description] || '' : '').replace(/\s+/g, ' ').trim().slice(0, 80);
       const label = columns.category >= 0 ? row[columns.category] || '' : '';
       const { category, guessed } = guessCategory(note, label);
-      const entry = { row: index, date, amount: Math.round(amount * 100) / 100, note, category, guessed };
+      const entry = { row: index, date, time, amount: Math.round(amount * 100) / 100, note, category, guessed };
       entry.duplicate = seen.has(dupKey(entry));
       seen.add(dupKey(entry));
       entries.push(entry);
     });
-    entries.sort((a, b) => b.date.localeCompare(a.date) || a.row - b.row);
+    entries.sort((a, b) => b.date.localeCompare(a.date) || (b.time || '').localeCompare(a.time || '') || a.row - b.row);
     return { entries, skipped };
   }
 
@@ -638,7 +698,9 @@
     readFile,
     parseAmount,
     parseDate,
+    parseTime,
     detectDateOrder,
+    merchantName,
     findHeader,
     guessColumns,
     guessCategory,
