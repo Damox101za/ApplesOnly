@@ -49,7 +49,7 @@ served by a small dependency-free Node.js server.
   or dock (Settings → Install the app, or Share → Add to Home Screen on an
   iPhone). It opens in its own window and still works with no connection;
   changes sync when you are back online. Offline support needs https (or
-  localhost), which Vercel and Azure both provide.
+  localhost), which Vercel provides.
 - **Light and dark themes** — follows your system, or use the toggle in the
   header.
 - **Animated background** — a soft, slowly moving banner at the top of every page
@@ -92,7 +92,7 @@ npm start
    a secret; Firebase web keys are meant to be public.
 5. Set `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY` and `SESSION_SECRET` (a long
    random string, at least 16 characters; without it sign-in stays off). On
-   Azure these are app settings instead of a `.env` file. Optionally set
+   a host these are its environment settings instead of a `.env` file. Optionally set
    `FIREBASE_AUTH_DOMAIN` if you don't use the default
    `<projectId>.firebaseapp.com`.
 
@@ -233,4 +233,5 @@ backups, and a click-through of every page with the Content Security Policy
 enforced.
 
 GitHub runs both on every push and pull request (`.github/workflows/tests.yml`,
-with a real Redis), and the Azure deploy stops if `npm test` fails.
+with a real Redis), so a pull request shows a red cross if something broke.
+The live site is deployed by Vercel from `main`.
