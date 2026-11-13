@@ -14,7 +14,7 @@ const auth = require('./auth');
 
 // What a signed-out visitor may load while sign-in is on. The sign-in page and
 // everything it needs, nothing else.
-const PUBLIC_FILES = new Set(['/login.html', '/login.js', '/style.css', '/background.js', '/favicon.ico']);
+const PUBLIC_FILES = new Set(['/login.html', '/login.js', '/firebase-client.js', '/style.css', '/background.js', '/favicon.ico']);
 
 const NEXT = { action: 'next' };
 

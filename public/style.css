@@ -857,24 +857,10 @@ button:disabled {
   gap: 0.5rem;
 }
 
-.google-setup {
-  margin-top: 0.75rem;
+.google-hint {
+  margin: 0.75rem 0 0;
   font-size: 0.85rem;
   color: var(--muted-foreground);
-}
-
-.google-setup summary {
-  cursor: pointer;
-  color: var(--foreground);
-  font-weight: 500;
-}
-
-.google-setup p {
-  margin: 0.5rem 0;
-}
-
-.google-setup .inline-form {
-  margin-bottom: 0;
 }
 
 .section-heading {

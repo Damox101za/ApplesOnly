@@ -6,6 +6,7 @@ const path = require('path');
 const ai = require('./ai');
 const auth = require('./auth');
 const gate = require('./gate');
+const dataApi = require('./data');
 
 const port = process.env.PORT || 1337;
 
@@ -46,6 +47,7 @@ const server = http.createServer((req, res) => {
         return res.end('401 Sign in required');
     }
 
+    if (pathname === '/api/data') return dataApi.handle(req, res);
     if (pathname.startsWith('/api/ai/')) return ai.handle(req, res, pathname);
     if (pathname === '/') pathname = '/index.html';
 

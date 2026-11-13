@@ -12,6 +12,7 @@
 
 const crypto = require('crypto');
 const { sendJson, sameOrigin, readJsonBody, closeAfterResponse, clientIp } = require('./httpkit');
+const store = require('./store');
 
 // Firebase signs its ID tokens with these keys (RS256).
 const JWKS_URL =
@@ -237,7 +238,7 @@ async function handle(req, res, pathname) {
   const route = pathname.replace(/^\/api\/auth\//, '');
 
   if (route === 'config' && req.method === 'GET') {
-    return sendJson(res, 200, { enabled: isEnabled(), firebase: isEnabled() ? firebaseConfig() : null });
+    return sendJson(res, 200, { enabled: isEnabled(), firebase: isEnabled() ? firebaseConfig() : null, cloudSync: isEnabled() && store.isConfigured() });
   }
 
   if (route === 'me' && req.method === 'GET') {

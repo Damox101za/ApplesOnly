@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Local copy of synced data (when no Upstash is configured)
+data/
+
 # Dependencies and OS noise
 node_modules/
 .DS_Store

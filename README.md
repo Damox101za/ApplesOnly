@@ -14,8 +14,8 @@ served by a small dependency-free Node.js server.
   (`#name`) and a project (`@name`), with a live preview.
 - **Tasks** — list and kanban-board views, due dates, priority, daily / weekly /
   monthly repeats, and links to a goal and a project. Import/export `.ics`
-  files, and optionally sync two-way with Google Calendar (enter your own
-  Google OAuth client ID on the Tasks tab).
+  files, and optionally sync two-way with Google Calendar (the Connect button on the Tasks
+  tab; it uses the same Firebase sign-in, so there is nothing extra to set up).
 - **Habits** — daily, weekdays, weekends, specific days, or once a week. Streaks
   respect the schedule, so off days never break them.
 - **Journal** — entries with a mood and tags, with a tag filter.
@@ -38,7 +38,9 @@ served by a small dependency-free Node.js server.
   (your choice is remembered). It stays still if your system asks for reduced
   motion.
 
-Data is stored locally in the browser (`localStorage`) — no database.
+Data is kept in the browser (`localStorage`). When sign-in is set up (below) it
+is also saved to your account, so it follows you to any device; see
+[Syncing across devices](#syncing-across-devices).
 
 ## Sign in with Google (optional)
 
@@ -98,6 +100,35 @@ Functions. They use the same code as the Node server (`gate.js`, `auth.js`).
 
 Preview deployments stay open (and are already behind Vercel's own login).
 To turn sign-in off again, remove `SESSION_SECRET` and redeploy.
+
+## Syncing across devices
+
+Once sign-in works, your tasks, goals, habits, journal, projects, money and Life
+Wheel ratings are also saved under your Google account on the server, a couple of
+seconds after each change, and pulled onto any other device you sign in on. The
+browser's copy stays the working copy, so the app still opens and works offline;
+changes sync when you are back. Theme, background and view settings stay per
+device. The sidebar footer shows the state (*Saved to your account*, *Saving…*,
+*Offline*).
+
+- **Locally / your own server:** nothing to set up. The copy goes in
+  `data/store.json` (git-ignored). Set `DATA_FILE` to put it elsewhere.
+- **On Vercel:** in the dashboard open **Storage → Create → Upstash for Redis**
+  (free plan is plenty), connect it to the project, and redeploy. It adds
+  `KV_REST_API_URL` and `KV_REST_API_TOKEN` itself. Without a store, Vercel
+  keeps the old behaviour: data stays on each device.
+
+Each account only ever sees its own data (it is keyed by the verified Google
+account, never by anything the browser sends). Saves carry the revision they were
+based on, so two devices cannot silently overwrite each other: if both changed
+things, lists are merged item by item. A deletion made on one device can come
+back if the other device still had that item. Data is stored as plain JSON, readable
+by whoever owns the database, so do not put secrets in your journal.
+
+The first time you sign in on a device that already holds data, it is merged with
+the account's copy, so nothing on that device is lost. Signing in as a different
+Google account on the same browser clears that browser's copy first; it is safe in
+the first account.
 
 ## AI helpers (currently turned off)
 

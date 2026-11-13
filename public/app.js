@@ -7,7 +7,6 @@ const STORAGE_KEYS = {
   tasks: 'lifeTracker.tasks',
   schemaVersion: 'lifeTracker.schemaVersion',
   lastBackupAt: 'lifeTracker.lastBackupAt',
-  googleClientId: 'lifeTracker.googleClientId',
   lastGoogleSyncAt: 'lifeTracker.lastGoogleSyncAt',
   taskViewMode: 'lifeTracker.taskViewMode',
   wheelRatings: 'lifeTracker.wheelRatings',
@@ -42,6 +41,7 @@ function load(key, fallback = []) {
 function save(key, data) {
   try {
     localStorage.setItem(key, JSON.stringify(data));
+    if (window.CloudSync) CloudSync.changed(key); // copy it to the signed-in account shortly
     return true;
   } catch (err) {
     showWarning('Could not save — your browser storage may be full or blocked.');
@@ -1141,66 +1141,59 @@ function startProjectEdit(id) {
 }
 
 // ---------- Google Calendar ----------
-// Client-side-only OAuth via Google Identity Services (no backend, no client
-// secret). The Client ID is the user's own — it's not a secret, it just
-// identifies which Google Cloud project to authenticate against, so it's
-// safe to keep in localStorage. Access tokens are kept in memory only (never
-// persisted) since they're short-lived and sensitive; reload = reconnect.
-let googleTokenClient = null;
+// Calendar access goes through Firebase Authentication: the same Google sign-in
+// window as login, with the calendar.events scope added. Firebase owns the
+// Google OAuth client, so there is no Client ID to set up. The access token
+// lasts about an hour and is kept in memory only (never persisted); when it
+// runs out, the next Calendar action opens the Google window again.
 let googleAccessToken = null;
 let googleTokenExpiresAt = 0;
 let googleConnected = false;
-
-function getGoogleClientId() {
-  return load(STORAGE_KEYS.googleClientId, null);
-}
+let accountEmail = ''; // set by initAccount; used to pre-select the right Google account
 
 function isGoogleConnected() {
   return googleConnected;
 }
 
-function ensureGoogleTokenClient() {
-  const clientId = getGoogleClientId();
-  if (!clientId) throw new Error('Add your Google Client ID first.');
-  if (!window.google || !window.google.accounts) {
-    throw new Error("Google sign-in script hasn't loaded yet — check your connection and try again.");
+function calendarAuthMessage(err) {
+  switch (err && err.code) {
+    case 'auth/popup-blocked':
+      return 'Your browser blocked the Google window. Allow pop-ups for this site, then click Connect again.';
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return 'The Google window was closed before access was granted.';
+    case 'auth/unauthorized-domain':
+      return `${location.hostname} is not an authorized domain in Firebase yet.`;
+    case 'auth/network-request-failed':
+      return "Couldn't reach Google. Check your connection and try again.";
+    default:
+      return (err && err.message) || 'Google did not give calendar access.';
   }
-  if (!googleTokenClient || googleTokenClient._clientId !== clientId) {
-    googleTokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: GOOGLE_CALENDAR_SCOPE,
-      callback: () => {}, // overridden per-request in requestGoogleAccessToken
-    });
-    googleTokenClient._clientId = clientId;
-  }
-  return googleTokenClient;
 }
 
-function requestGoogleAccessToken(interactive) {
-  return new Promise((resolve, reject) => {
-    let client;
-    try {
-      client = ensureGoogleTokenClient();
-    } catch (err) {
-      reject(err);
-      return;
-    }
-    client.callback = (resp) => {
-      if (resp.error) {
-        reject(new Error(resp.error));
-        return;
-      }
-      googleAccessToken = resp.access_token;
-      googleTokenExpiresAt = Date.now() + resp.expires_in * 1000;
-      resolve(googleAccessToken);
-    };
-    client.requestAccessToken({ prompt: interactive ? 'consent' : '' });
-  });
+async function requestGoogleAccessToken() {
+  const fb = await FirebaseClient.load();
+  const provider = new fb.GoogleAuthProvider();
+  provider.addScope(GOOGLE_CALENDAR_SCOPE);
+  if (accountEmail) provider.setCustomParameters({ login_hint: accountEmail });
+  try {
+    const result = await fb.signInWithPopup(fb.auth, provider);
+    const credential = fb.GoogleAuthProvider.credentialFromResult(result);
+    if (!credential || !credential.accessToken) throw new Error('Google did not give calendar access.');
+    googleAccessToken = credential.accessToken;
+    googleTokenExpiresAt = Date.now() + 55 * 60 * 1000;
+    return googleAccessToken;
+  } catch (err) {
+    throw new Error(calendarAuthMessage(err));
+  } finally {
+    // We only wanted the calendar token; our own session cookie is what signs us in.
+    fb.auth.signOut().catch(() => {});
+  }
 }
 
 async function calendarFetch(path, options = {}, retried = false) {
   if (!googleAccessToken || Date.now() >= googleTokenExpiresAt - 5000) {
-    await requestGoogleAccessToken(!googleAccessToken);
+    await requestGoogleAccessToken();
   }
   const res = await fetch(`https://www.googleapis.com/calendar/v3${path}`, {
     ...options,
@@ -1243,7 +1236,7 @@ function updateGoogleUI() {
 
 async function connectGoogleCalendar() {
   try {
-    await requestGoogleAccessToken(true);
+    await requestGoogleAccessToken();
     // The calendar.events scope covers the Events resource but not
     // Calendars.get, so verify the token with an events call, not a
     // calendar-metadata call (which would 403 with this scope).
@@ -1257,8 +1250,12 @@ async function connectGoogleCalendar() {
 }
 
 function disconnectGoogleCalendar() {
-  if (googleAccessToken && window.google && window.google.accounts) {
-    google.accounts.oauth2.revoke(googleAccessToken, () => {});
+  if (googleAccessToken) {
+    fetch('https://oauth2.googleapis.com/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `token=${encodeURIComponent(googleAccessToken)}`,
+    }).catch(() => {});
   }
   googleAccessToken = null;
   googleTokenExpiresAt = 0;
@@ -1404,18 +1401,18 @@ async function syncFromGoogleCalendar() {
 document.getElementById('googleConnectBtn').addEventListener('click', connectGoogleCalendar);
 document.getElementById('googleDisconnectBtn').addEventListener('click', disconnectGoogleCalendar);
 document.getElementById('googleSyncBtn').addEventListener('click', syncFromGoogleCalendar);
-document.getElementById('googleClientIdSaveBtn').addEventListener('click', () => {
-  const input = document.getElementById('googleClientIdInput');
-  const value = input.value.trim();
-  if (!value) return;
-  save(STORAGE_KEYS.googleClientId, value);
-  googleTokenClient = null; // force re-init against the new client id
-  showWarning('Google Client ID saved. Click Connect to sign in.');
-});
+// Connecting opens a pop-up, which browsers only allow straight after a click,
+// so get the sign-in library ready before the click lands.
+['pointerenter', 'focus', 'touchstart'].forEach((type) =>
+  document.getElementById('googleConnectBtn').addEventListener(type, () => FirebaseClient.load().catch(() => {}), { once: true })
+);
 
-(function initGoogleClientIdField() {
-  const saved = getGoogleClientId();
-  if (saved) document.getElementById('googleClientIdInput').value = saved;
+(function initGoogleCalendarCard() {
+  try {
+    localStorage.removeItem('lifeTracker.googleClientId'); // the old hand-made Client ID is no longer used
+  } catch {
+    /* storage unavailable */
+  }
   updateGoogleUI();
 })();
 
@@ -3479,6 +3476,7 @@ async function initAccount() {
   accountBtn.setAttribute('aria-label', `Account: ${user.email}`);
   document.getElementById('accountName').textContent = user.name;
   document.getElementById('accountEmail').textContent = user.email;
+  accountEmail = user.email;
   accountEl.hidden = false;
 }
 
@@ -3530,3 +3528,19 @@ appReady = true;
 renderBanner();
 detectAI();
 initAccount();
+
+// When another device's changes arrive (or are merged in), re-read storage and redraw.
+function reloadFromStorage() {
+  ({ habits, journal, goals, tasks, projects } = loadAndMigrate());
+  money = load(STORAGE_KEYS.money, {});
+  wheelRatings = load(STORAGE_KEYS.wheelRatings, {});
+  renderHabits();
+  renderJournal();
+  renderGoals();
+  renderTasksView();
+  renderProjects();
+  renderMoney();
+  renderDashboard();
+  renderBanner();
+}
+if (window.CloudSync) CloudSync.onRemoteChange(reloadFromStorage);

@@ -25,7 +25,7 @@
         </div>
       </div>
       <nav class="sidebar-nav" id="tabs" aria-label="Sections"></nav>
-      <div class="sidebar-footer">Your data stays on this device.</div>
+      <div class="sidebar-footer" id="syncStatus">Your data stays on this device.</div>
     </aside>
 
     <div class="panel-wrap">
@@ -82,19 +82,11 @@
                   <button type="button" id="googleDisconnectBtn" class="secondary-btn" hidden>Disconnect</button>
                 </div>
               </div>
-              <details class="google-setup">
-                <summary>Google Client ID setup</summary>
-                <p>
-                  Tasks with a due date can create matching events on your Google Calendar.
-                  You'll need an OAuth Client ID from your own Google Cloud project
-                  (it's not a secret — safe to store here). Ask for setup steps if you
-                  haven't made one yet.
-                </p>
-                <div class="inline-form">
-                  <input type="text" id="googleClientIdInput" placeholder="xxxxx.apps.googleusercontent.com">
-                  <button type="button" id="googleClientIdSaveBtn">Save</button>
-                </div>
-              </details>
+              <p class="google-hint">
+                Tasks with a due date can create matching events on your Google Calendar,
+                and events on your calendar can come in as tasks. Connecting opens a Google
+                window that asks for calendar access.
+              </p>
             </div>
 
             <div class="card" id="icsCard">
@@ -390,8 +382,8 @@
     <button type="button" class="toast-undo">Undo</button>
   </div>
 
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="background.js"></script>
-  <script src="app.js"></script>
+  <script src="firebase-client.js"></script>
+  <script src="sync.js"></script>
 </body>
 </html>
