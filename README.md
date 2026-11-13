@@ -207,3 +207,27 @@ npm start
 ```
 
 Then open http://localhost:1337 in your browser.
+
+## Tests
+
+```bash
+npm test
+```
+
+Runs the server and data tests with Node's built-in test runner: encryption,
+the version history, the sign-in gate, security headers, and `/api/data`
+against a real server process. The Redis tests run only when a Redis is
+listening on `REDIS_PORT` (default 6379); otherwise they are skipped.
+
+```bash
+npx playwright install chromium   # once
+npm run test:browser
+```
+
+Runs the app in a real browser: quick-add parsing, data migrations, habit
+streaks, goal progress, `.ics` import, sync merging, password-protected
+backups, and a click-through of every page with the Content Security Policy
+enforced.
+
+GitHub runs both on every push and pull request (`.github/workflows/tests.yml`,
+with a real Redis), and the Azure deploy stops if `npm test` fails.

@@ -4,12 +4,18 @@
   "description": "A personal life tracker: habits, journal, and goals.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test test/unit/*.test.js",
+    "test:browser": "node --test test/browser/*.e2e.js",
+    "test:all": "npm test && npm run test:browser"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "@vercel/functions": "^3.11.1"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
   }
 }
