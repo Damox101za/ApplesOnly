@@ -337,6 +337,13 @@
                 </label>
                 <button type="submit">Add</button>
               </form>
+              <div class="spend-import-row">
+                <label class="file-btn">
+                  Import from CSV or Excel
+                  <input type="file" id="spendImportFile" accept=".csv,.txt,.xlsx,.xlsm,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+                </label>
+                <span class="item-meta">Bank statements or your own sheets, in any column order. Read on this device, never uploaded.</span>
+              </div>
               <ul class="item-list expense-list" id="expenseList"></ul>
             </div>
 
@@ -527,6 +534,52 @@
     <div class="search-foot" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span></div>
   </dialog>
 
+  <dialog class="import-dialog" id="spendImportDialog" aria-labelledby="spendImportTitle">
+    <div class="import-dialog-head">
+      <div>
+        <h2 id="spendImportTitle">Import spending</h2>
+        <p class="item-meta" id="spendImportFileName"></p>
+      </div>
+      <button type="button" class="icon-btn small" id="spendImportClose" aria-label="Close">✕</button>
+    </div>
+    <div class="import-dialog-body">
+      <details class="import-map" id="spendImportMap">
+        <summary>Which column is which? <span class="item-meta" id="spendImportMapHint"></span></summary>
+        <div class="import-map-grid">
+          <label class="field"><span>Date</span><select id="mapDate"></select></label>
+          <label class="field"><span>Description</span><select id="mapDescription"></select></label>
+          <label class="field"><span>Amount</span><select id="mapAmount"></select></label>
+          <label class="field"><span>Money out</span><select id="mapDebit"></select></label>
+          <label class="field"><span>Money in</span><select id="mapCredit"></select></label>
+          <label class="field"><span>Category (optional)</span><select id="mapCategory"></select></label>
+          <label class="field"><span>Dates are written</span>
+            <select id="mapOrder"><option value="dmy">Day first (13/11/2026)</option><option value="mdy">Month first (11/13/2026)</option></select></label>
+          <label class="field" id="mapSpendingField"><span>Spending is</span>
+            <select id="mapSpending"><option value="negative">Negative amounts (money out)</option><option value="positive">Positive amounts</option><option value="all">Every amount</option></select></label>
+        </div>
+      </details>
+      <p class="import-summary" id="spendImportSummary" role="status"></p>
+      <div class="import-table-wrap">
+        <table class="import-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="spendImportAll" aria-label="Select all" checked></th>
+              <th>Date</th>
+              <th>Description</th>
+              <th class="num">Amount</th>
+              <th>Budget</th>
+            </tr>
+          </thead>
+          <tbody id="spendImportRows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="import-dialog-foot">
+      <button type="button" class="secondary-btn" id="spendImportCancel">Cancel</button>
+      <button type="button" id="spendImportGo">Add entries</button>
+    </div>
+  </dialog>
+
   <div class="toast" id="toast">
     <span class="toast-message"></span>
     <button type="button" class="toast-undo">Undo</button>
@@ -534,6 +587,7 @@
 
   <script src="background.js"></script>
   <script src="firebase-client.js"></script>
+  <script src="spending-import.js"></script>
   <script src="sync.js"></script>
 </body>
 </html>

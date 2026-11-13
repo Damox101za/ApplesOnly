@@ -273,6 +273,56 @@ test('spending: logged against the 50/30/20 budget, month by month', async (t) =
   assert.deepEqual(problems, []);
 });
 
+test('spending import: messy bank CSV and Excel, with fixes in the preview', async (t) => {
+  const path = require('path');
+  const fixtures = path.join(__dirname, '..', 'fixtures');
+  const { page, problems } = await openApp(t);
+  await page.click('.tab-btn[data-tab="money"]');
+
+  await page.setInputFiles('#spendImportFile', path.join(fixtures, 'bank-statement.csv'));
+  await page.waitForSelector('#spendImportDialog[open]');
+  assert.match(await page.textContent('#spendImportFileName'), /9 rows · skipped 3 lines above the table/);
+  assert.match(await page.textContent('#spendImportSummary'), /8 to add, \$6,960\.24\. Left out: 1 money in\./);
+  assert.equal(await page.locator('#spendImportRows select.guessed').count(), 1, 'the one it could not sort is marked');
+
+  // Fix the guess, leave one row out, and add.
+  const rows = page.locator('#spendImportRows tr');
+  await rows.nth(0).locator('select').selectOption('wants');
+  await rows.nth(1).locator('input[type="checkbox"]').uncheck();
+  assert.equal(await page.textContent('#spendImportGo'), 'Add 7 entries');
+  await page.click('#spendImportGo');
+  assert.equal(await page.isVisible('#spendImportDialog'), false);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('lifeTracker.expenses')));
+  assert.equal(saved.length, 7);
+  assert.equal(saved.find((e) => e.note === 'SOMETHING UNUSUAL').category, 'wants');
+  assert.ok(!saved.some((e) => e.note === 'ENGEN GARAGE N1'), 'the unticked row stayed out');
+
+  // The same file again: everything already there is left unticked.
+  await page.setInputFiles('#spendImportFile', path.join(fixtures, 'bank-statement.csv'));
+  await page.waitForSelector('#spendImportDialog[open]');
+  assert.match(await page.textContent('#spendImportSummary'), /^1 to add/, 'only the row left out last time');
+  assert.match(await page.textContent('#spendImportSummary'), /7 already logged/);
+
+  // Point "Description" at another column: the preview follows.
+  await page.click('#spendImportMap summary');
+  await page.selectOption('#mapDescription', '2'); // the Balance column
+  assert.match(await page.locator('#spendImportRows tr').first().textContent(), /6039\.76/);
+  await page.click('#spendImportCancel');
+
+  // Excel, read entirely in the browser under the Content Security Policy.
+  await page.setInputFiles('#spendImportFile', path.join(fixtures, 'budget.xlsx'));
+  await page.waitForSelector('#spendImportDialog[open]');
+  assert.match(await page.textContent('#spendImportSummary'), /^4 to add/);
+  await page.click('#spendImportGo');
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('lifeTracker.expenses')).length), 11);
+
+  // Undo takes the whole import back out.
+  await page.click('.toast-undo');
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('lifeTracker.expenses')).length), 7);
+
+  assert.deepEqual(problems, []);
+});
+
 test('click-through: add, search, every page, no CSP violations or errors', async (t) => {
   const { page, problems } = await openApp(t);
 

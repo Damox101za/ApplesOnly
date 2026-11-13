@@ -3506,6 +3506,224 @@ document.getElementById('expenseList').addEventListener('click', (e) => {
   if (btn) queueDelete('expense', expenses, btn.dataset.deleteExpense, renderMoney);
 });
 
+// ---------- Importing spending from CSV / Excel ----------
+// spending-import.js reads the file and guesses the columns; this shows a
+// preview where every guess can be changed before anything is added.
+const importDialog = document.getElementById('spendImportDialog');
+let spendImport = null; // { name, analysis, columns, order, spending, overrides: Map(row -> { include, category }), result }
+
+const MAP_FIELDS = { mapDate: 'date', mapDescription: 'description', mapAmount: 'amount', mapDebit: 'debit', mapCredit: 'credit', mapCategory: 'category' };
+const MAX_IMPORT_BYTES = 15 * 1024 * 1024;
+
+async function openSpendImport(file) {
+  if (!window.SpendingImport) return showWarning('The importer did not load. Refresh the page and try again.');
+  if (file.size > MAX_IMPORT_BYTES) return showWarning('That file is too big to import (the limit is 15 MB).');
+  let rows;
+  try {
+    rows = await SpendingImport.readFile(file);
+  } catch (err) {
+    return showWarning(err.message || "Couldn't read that file.");
+  }
+  if (!rows.length) return showWarning("Couldn't find any rows in that file.");
+  // Day-first unless this really looks like a US setup (US English and dollars).
+  const usStyle = /^en-US$/i.test(navigator.language || '') && moneyCurrency() === '$';
+  const analysis = SpendingImport.analyse(rows, { locale: usStyle ? 'en-US' : 'en-GB' });
+  spendImport = {
+    name: file.name,
+    analysis,
+    columns: { ...analysis.columns },
+    order: analysis.dateOrder,
+    spending: analysis.spending,
+    overrides: new Map(),
+    result: null,
+  };
+  document.getElementById('spendImportFileName').textContent =
+    `${file.name} · ${analysis.data.length} row${analysis.data.length === 1 ? '' : 's'}` +
+    (() => {
+      const above = analysis.headerRow >= 0 ? analysis.headerRow : analysis.start;
+      return above > 0 ? ` · skipped ${above} line${above === 1 ? '' : 's'} above the table` : '';
+    })();
+
+  const options = `<option value="-1">— none —</option>` + analysis.labels.map((l, i) => `<option value="${i}">${escapeHtml(l)}</option>`).join('');
+  for (const [id, key] of Object.entries(MAP_FIELDS)) {
+    const sel = document.getElementById(id);
+    sel.innerHTML = options;
+    sel.value = String(spendImport.columns[key]);
+  }
+  document.getElementById('mapOrder').value = spendImport.order;
+  // Only ask about date order when the dates could be read either way.
+  document.getElementById('mapOrder').closest('.field').hidden = !analysis.dateAmbiguous;
+  document.getElementById('mapSpending').value = spendImport.spending;
+  const c = spendImport.columns;
+  // Open the column chooser straight away when something important wasn't found.
+  document.getElementById('spendImportMap').open = c.date < 0 || (c.amount < 0 && c.debit < 0) || analysis.dateAmbiguous;
+  renderSpendImport();
+  importDialog.showModal();
+}
+
+function renderSpendImport() {
+  const st = spendImport;
+  const c = st.columns;
+  const usesDebit = c.debit >= 0;
+  document.getElementById('mapSpendingField').hidden = usesDebit;
+  const hint = [];
+  if (c.date < 0) hint.push('choose the date column');
+  if (c.amount < 0 && c.debit < 0) hint.push('choose the amount column');
+  if (st.analysis.dateAmbiguous) hint.push('check how dates are written');
+  document.getElementById('spendImportMapHint').textContent = hint.length ? `(${hint.join(', ')})` : '(worked out from the file)';
+
+  st.result = SpendingImport.buildEntries(st.analysis.data, c, { dateOrder: st.order, spending: st.spending, existing: expenses });
+  const { entries, skipped } = st.result;
+  const rowsHtml = entries
+    .map((e) => {
+      const o = st.overrides.get(e.row) || {};
+      const include = o.include !== undefined ? o.include : !e.duplicate;
+      const cat = o.category || e.category;
+      return `<tr class="${include ? '' : 'excluded'}" data-row="${e.row}">
+        <td><input type="checkbox" data-include ${include ? 'checked' : ''} aria-label="Import this row"></td>
+        <td class="nowrap">${escapeHtml(shortDate(e.date))}</td>
+        <td>${escapeHtml(e.note || '—')}${e.duplicate ? ' <span class="import-flag">already logged</span>' : ''}</td>
+        <td class="num">${escapeHtml(fmtMoneyExact(e.amount))}</td>
+        <td><select data-category class="${e.guessed && !o.category ? 'guessed' : ''}" aria-label="Part of budget">
+          ${Object.entries(CATEGORY_LABELS).map(([k, l]) => `<option value="${k}"${k === cat ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}
+        </select></td>
+      </tr>`;
+    })
+    .join('');
+  document.getElementById('spendImportRows').innerHTML =
+    rowsHtml || '<tr><td colspan="5" class="empty-state">No spending found with these columns. Open “Which column is which?” above.</td></tr>';
+
+  const chosen = spendImportSelection();
+  const total = chosen.reduce((sum, e) => sum + e.amount, 0);
+  const months = new Set(chosen.map((e) => e.date.slice(0, 7))).size;
+  const dupes = entries.filter((e) => e.duplicate).length;
+  const guessed = chosen.filter((e) => e.guessed && !(st.overrides.get(e.row) || {}).category).length;
+  const parts = [];
+  if (skipped.income) parts.push(`${skipped.income} money in`);
+  if (dupes) parts.push(`${dupes} already logged (unticked)`);
+  if (skipped.unreadable) parts.push(`${skipped.unreadable} without a readable date or amount`);
+  if (skipped.zero) parts.push(`${skipped.zero} of zero`);
+  document.getElementById('spendImportSummary').innerHTML =
+    `<strong>${chosen.length}</strong> to add, ${escapeHtml(fmtMoneyExact(Math.round(total * 100) / 100))}` +
+    (months > 1 ? ` across ${months} months` : '') +
+    (parts.length ? `. Left out: ${escapeHtml(parts.join(', '))}.` : '.') +
+    (guessed
+      ? guessed === 1
+        ? ' 1 couldn’t be sorted from its description and is marked in orange; check its part of the budget.'
+        : ` ${guessed} couldn’t be sorted from their descriptions and are marked in orange; check their part of the budget.`
+      : '');
+  const go = document.getElementById('spendImportGo');
+  go.disabled = !chosen.length;
+  go.textContent = chosen.length ? `Add ${chosen.length} entr${chosen.length === 1 ? 'y' : 'ies'}` : 'Add entries';
+  const all = document.getElementById('spendImportAll');
+  all.checked = entries.length > 0 && chosen.length === entries.length;
+  all.indeterminate = chosen.length > 0 && chosen.length < entries.length;
+}
+
+// "11 Nov", with the year only when it isn't this year.
+function shortDate(iso) {
+  const d = new Date(`${iso}T00:00:00`);
+  const opts = { day: 'numeric', month: 'short' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  return d.toLocaleDateString(undefined, opts);
+}
+
+function spendImportSelection() {
+  const st = spendImport;
+  return st.result.entries
+    .filter((e) => {
+      const o = st.overrides.get(e.row);
+      return o && o.include !== undefined ? o.include : !e.duplicate;
+    })
+    .map((e) => ({ ...e, category: (st.overrides.get(e.row) || {}).category || e.category }));
+}
+
+function setOverride(row, patch) {
+  spendImport.overrides.set(row, { ...(spendImport.overrides.get(row) || {}), ...patch });
+}
+
+for (const [id, key] of Object.entries(MAP_FIELDS)) {
+  document.getElementById(id).addEventListener('change', (e) => {
+    const col = Number(e.target.value);
+    // One column can only mean one thing: free it from whatever else had it.
+    for (const k of Object.keys(spendImport.columns)) if (k !== key && spendImport.columns[k] === col && col >= 0) spendImport.columns[k] = -1;
+    spendImport.columns[key] = col;
+    if (key === 'debit' && col >= 0) spendImport.columns.amount = -1;
+    if (key === 'amount' && col >= 0) spendImport.columns.debit = spendImport.columns.credit = -1;
+    for (const [i, k] of Object.entries(MAP_FIELDS)) document.getElementById(i).value = String(spendImport.columns[k]);
+    spendImport.overrides.clear(); // rows may now mean something else
+    renderSpendImport();
+  });
+}
+document.getElementById('mapOrder').addEventListener('change', (e) => {
+  spendImport.order = e.target.value;
+  renderSpendImport();
+});
+document.getElementById('mapSpending').addEventListener('change', (e) => {
+  spendImport.spending = e.target.value;
+  spendImport.overrides.clear();
+  renderSpendImport();
+});
+
+document.getElementById('spendImportRows').addEventListener('change', (e) => {
+  const tr = e.target.closest('tr[data-row]');
+  if (!tr) return;
+  const row = Number(tr.dataset.row);
+  if (e.target.matches('[data-include]')) setOverride(row, { include: e.target.checked });
+  if (e.target.matches('[data-category]')) setOverride(row, { category: e.target.value });
+  renderSpendImport();
+});
+document.getElementById('spendImportAll').addEventListener('change', (e) => {
+  spendImport.result.entries.forEach((x) => setOverride(x.row, { include: e.target.checked }));
+  renderSpendImport();
+});
+
+function closeSpendImport() {
+  if (importDialog.open) importDialog.close();
+}
+importDialog.addEventListener('close', () => {
+  spendImport = null;
+  document.getElementById('spendImportFile').value = '';
+});
+document.getElementById('spendImportClose').addEventListener('click', closeSpendImport);
+document.getElementById('spendImportCancel').addEventListener('click', closeSpendImport);
+
+document.getElementById('spendImportGo').addEventListener('click', () => {
+  const chosen = spendImportSelection();
+  if (!chosen.length) return;
+  const now = Date.now();
+  const added = chosen.map((e, i) => ({
+    id: uid(),
+    amount: e.amount,
+    note: e.note,
+    category: CATEGORY_LABELS[e.category] ? e.category : 'needs',
+    date: e.date,
+    createdAt: now + i,
+  }));
+  if (window.CloudSync && CloudSync.isEnabled()) CloudSync.keepVersionBeforeNextSave();
+  expenses.push(...added);
+  save(STORAGE_KEYS.expenses, expenses);
+  spendMonth = added.map((e) => e.date.slice(0, 7)).sort().pop(); // the latest month imported
+  closeSpendImport();
+  renderMoney();
+  const ids = new Set(added.map((e) => e.id));
+  showToast(`Added ${added.length} entr${added.length === 1 ? 'y' : 'ies'}.`, () => {
+    expenses = expenses.filter((e) => !ids.has(e.id));
+    save(STORAGE_KEYS.expenses, expenses);
+    renderMoney();
+    hideToast();
+  });
+  const message = document.querySelector('#toast .toast-message').textContent;
+  setTimeout(() => {
+    if (document.querySelector('#toast .toast-message').textContent === message) hideToast();
+  }, 10000);
+});
+
+document.getElementById('spendImportFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) openSpendImport(file);
+});
+
 document.getElementById('spendPrev').addEventListener('click', () => {
   spendMonth = shiftMonth(spendMonth, -1);
   renderMoney();
