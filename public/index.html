@@ -51,7 +51,6 @@
                 <button type="button" id="signOutBtn" class="secondary-btn">Sign out</button>
               </div>
             </div>
-            <button type="button" id="bgToggle" class="icon-btn" aria-pressed="true" aria-label="Turn the animated background off" title="Turn the animated background off"></button>
             <button type="button" id="themeToggle" class="icon-btn" aria-label="Toggle theme"></button>
           </div>
         </header>
@@ -70,48 +69,6 @@
           </section>
 
           <section id="tasks" class="tab-panel">
-            <div class="card" id="googleCard">
-              <div class="google-header">
-                <div>
-                  <div class="card-title-plain">Google Calendar</div>
-                  <div class="google-status" id="googleStatus">Not connected.</div>
-                </div>
-                <div class="google-actions">
-                  <button type="button" id="googleConnectBtn">Connect</button>
-                  <button type="button" id="googleSyncBtn" class="secondary-btn" hidden>Sync now</button>
-                  <button type="button" id="googleDisconnectBtn" class="secondary-btn" hidden>Disconnect</button>
-                </div>
-              </div>
-              <p class="google-hint">
-                Tasks with a due date can create matching events on your Google Calendar,
-                and events on your calendar can come in as tasks. Connecting opens a Google
-                window that asks for calendar access.
-              </p>
-            </div>
-
-            <div class="card" id="icsCard">
-              <div class="google-header">
-                <div>
-                  <div class="card-title-plain">Import / export calendar (.ics)</div>
-                  <div class="google-status">Works with any calendar app — Google, Apple, Outlook, or a forwarded invite.</div>
-                </div>
-                <div class="google-actions">
-                  <button type="button" id="icsExportBtn" class="secondary-btn">Export .ics</button>
-                  <label class="file-btn">
-                    Import .ics
-                    <input type="file" id="icsImportFile" accept=".ics,text/calendar">
-                  </label>
-                </div>
-              </div>
-              <div class="import-confirm" id="icsImportConfirm">
-                <p id="icsImportSummary"></p>
-                <div class="import-confirm-actions">
-                  <button type="button" id="icsImportCancelBtn" class="secondary-btn">Cancel</button>
-                  <button type="button" id="icsImportConfirmBtn">Add as tasks</button>
-                </div>
-              </div>
-            </div>
-
             <form id="taskForm" class="inline-form form-grid">
               <input type="text" id="taskInput" class="span-all" placeholder="New task, e.g. Renew passport" required>
               <input type="date" id="taskDate" aria-label="Due date">
@@ -284,27 +241,6 @@
               </div>
             </section>
 
-            <div class="card backup-card" id="backupCard">
-              <div class="backup-info">
-                <div class="backup-title">Backup</div>
-                <div class="backup-status" id="backupStatus"></div>
-              </div>
-              <div class="backup-actions">
-                <button type="button" id="exportBtn">Export backup</button>
-                <label class="file-btn">
-                  Import backup
-                  <input type="file" id="importFile" accept="application/json">
-                </label>
-              </div>
-            </div>
-
-            <div class="import-confirm" id="importConfirm">
-              <p id="importSummary"></p>
-              <div class="import-confirm-actions">
-                <button type="button" id="importCancelBtn" class="secondary-btn">Cancel</button>
-                <button type="button" id="importConfirmBtn">Replace my data</button>
-              </div>
-            </div>
           </section>
 
           <section id="wheel" class="tab-panel">
@@ -370,6 +306,96 @@
                 <p class="item-meta">Save for big, predictable expenses without the stress.</p>
                 <p>A sinking fund is a small, regular saving for a specific future purchase, such as a car, a holiday or gifts. Breaking a large cost into small monthly amounts helps you avoid debt and the shock of a big one-off expense.</p>
               </details>
+            </div>
+          </section>
+          <section id="settings" class="tab-panel">
+            <h2 class="section-heading settings-heading">Appearance</h2>
+            <div class="card settings-card">
+              <div class="setting-row">
+                <div>
+                  <div class="card-title-plain">Theme</div>
+                  <div class="google-status">Follow your system, or pick one. The moon/sun button in the header switches it too.</div>
+                </div>
+                <select id="themeSelect" aria-label="Theme">
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <div class="card-title-plain" id="bgSwitchLabel">Animated background</div>
+                  <div class="google-status">The softly moving banner at the top of each page. It stays still if your system asks for reduced motion.</div>
+                </div>
+                <button type="button" id="bgToggle" class="switch" role="switch" aria-checked="true" aria-labelledby="bgSwitchLabel"><span class="switch-thumb"></span></button>
+              </div>
+            </div>
+
+            <h2 class="section-heading settings-heading">Calendar</h2>
+            <div class="card" id="googleCard">
+              <div class="google-header">
+                <div>
+                  <div class="card-title-plain">Google Calendar</div>
+                  <div class="google-status" id="googleStatus">Not connected.</div>
+                </div>
+                <div class="google-actions">
+                  <button type="button" id="googleConnectBtn">Connect</button>
+                  <button type="button" id="googleSyncBtn" class="secondary-btn" hidden>Sync now</button>
+                  <button type="button" id="googleDisconnectBtn" class="secondary-btn" hidden>Disconnect</button>
+                </div>
+              </div>
+              <p class="google-hint">
+                Tasks with a due date can create matching events on your Google Calendar,
+                and events on your calendar can come in as tasks. Connecting opens a Google
+                window that asks for calendar access.
+              </p>
+            </div>
+
+            <div class="card" id="icsCard">
+              <div class="google-header">
+                <div>
+                  <div class="card-title-plain">Import / export calendar (.ics)</div>
+                  <div class="google-status">Works with any calendar app — Google, Apple, Outlook, or a forwarded invite.</div>
+                </div>
+                <div class="google-actions">
+                  <button type="button" id="icsExportBtn" class="secondary-btn">Export .ics</button>
+                  <label class="file-btn">
+                    Import .ics
+                    <input type="file" id="icsImportFile" accept=".ics,text/calendar">
+                  </label>
+                </div>
+              </div>
+              <div class="import-confirm" id="icsImportConfirm">
+                <p id="icsImportSummary"></p>
+                <div class="import-confirm-actions">
+                  <button type="button" id="icsImportCancelBtn" class="secondary-btn">Cancel</button>
+                  <button type="button" id="icsImportConfirmBtn">Add as tasks</button>
+                </div>
+              </div>
+            </div>
+
+
+            <h2 class="section-heading settings-heading">Your data</h2>
+            <div class="card backup-card" id="backupCard">
+              <div class="backup-info">
+                <div class="backup-title">Backup</div>
+                <div class="backup-status" id="backupStatus"></div>
+              </div>
+              <div class="backup-actions">
+                <button type="button" id="exportBtn">Export backup</button>
+                <label class="file-btn">
+                  Import backup
+                  <input type="file" id="importFile" accept="application/json">
+                </label>
+              </div>
+            </div>
+
+            <div class="import-confirm" id="importConfirm">
+              <p id="importSummary"></p>
+              <div class="import-confirm-actions">
+                <button type="button" id="importCancelBtn" class="secondary-btn">Cancel</button>
+                <button type="button" id="importConfirmBtn">Replace my data</button>
+              </div>
             </div>
           </section>
         </main>

@@ -204,6 +204,7 @@ const ICON_PATHS = {
   'trending-up': '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
   sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M17 5h4"/>',
+  settings: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
   'chart-pie': '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>',
 };
 
@@ -216,6 +217,7 @@ const NAV = [
   { group: 'Daily', items: [['today', 'Today', 'sun'], ['tasks', 'Tasks', 'list-checks'], ['calendar', 'Calendar', 'calendar'], ['habits', 'Habits', 'flame'], ['journal', 'Journal', 'book-open']] },
   { group: 'Plan', items: [['goals', 'Goals', 'target'], ['projects', 'Projects', 'folder']] },
   { group: 'Insights', items: [['dashboard', 'Dashboard', 'layout-dashboard'], ['wheel', 'Life Wheel', 'hexagon'], ['money', 'Money', 'wallet']] },
+  { group: 'App', items: [['settings', 'Settings', 'settings']] },
 ];
 
 function showTab(tab) {
@@ -2881,6 +2883,12 @@ function renderDashboard() {
   const daysSince = daysSinceLastBackup();
   const stale = hasAnyData() && daysSince >= 7;
   backupCard.classList.toggle('stale', stale);
+  // The backup card lives on Settings, so flag the nav item when it needs a look.
+  const settingsBtn = document.querySelector('.tab-btn[data-tab="settings"]');
+  if (settingsBtn) {
+    settingsBtn.classList.toggle('needs-attention', stale);
+    settingsBtn.title = stale ? 'Settings: time for a backup' : '';
+  }
   if (!hasAnyData()) {
     backupStatus.textContent = 'No data yet.';
   } else if (daysSince === Infinity) {
@@ -3140,7 +3148,15 @@ function applyTheme(theme) {
     btn.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
     btn.innerHTML = icon(dark ? 'sun' : 'moon');
   }
+  const select = document.getElementById('themeSelect');
+  if (select) select.value = theme === 'light' || theme === 'dark' ? theme : 'system';
 }
+
+document.getElementById('themeSelect').addEventListener('change', (e) => {
+  const value = e.target.value === 'system' ? null : e.target.value;
+  applyTheme(value);
+  save(STORAGE_KEYS.theme, value);
+});
 
 document.getElementById('themeToggle').addEventListener('click', () => {
   const next = currentTheme() === 'dark' ? 'light' : 'dark';
@@ -3400,6 +3416,8 @@ function bannerFor(tab) {
       const avg = scores.reduce((sum, s) => sum + s.score, 0) / scores.length;
       return { title: 'Balance check', sub: `Average ${avg.toFixed(1)} out of 10 across ${scores.length} areas` };
     }
+    case 'settings':
+      return { title: 'Make it yours', sub: 'Appearance, calendar connections and backups' };
     case 'money':
       return {
         title: 'Your money',
@@ -3424,11 +3442,7 @@ const bgToggle = document.getElementById('bgToggle');
 function applyBackground(on) {
   if (on) delete document.documentElement.dataset.bg;
   else document.documentElement.dataset.bg = 'off';
-  const label = on ? 'Turn the animated background off' : 'Turn the animated background on';
-  bgToggle.setAttribute('aria-pressed', String(on));
-  bgToggle.setAttribute('aria-label', label);
-  bgToggle.title = label;
-  bgToggle.innerHTML = icon('sparkles');
+  bgToggle.setAttribute('aria-checked', String(on));
   if (window.AnimatedBackground) AnimatedBackground.setEnabled(on);
 }
 
