@@ -38,23 +38,7 @@ async function submitCredential(credential) {
   }
 }
 
-// Firebase handles the Google OAuth client for us; we only need its web config
-// from the server. The SDK is loaded on demand from Google's CDN.
-const FIREBASE_VERSION = '11.9.1';
-const FIREBASE_CDN = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
-
-let firebase = null; // { auth, GoogleAuthProvider, signInWithPopup, ... }
-
-async function loadFirebase(config) {
-  if (firebase) return firebase;
-  const [appMod, authMod] = await Promise.all([
-    import(`${FIREBASE_CDN}/firebase-app.js`),
-    import(`${FIREBASE_CDN}/firebase-auth.js`),
-  ]);
-  const app = appMod.initializeApp(config);
-  firebase = { ...authMod, auth: authMod.getAuth(app) };
-  return firebase;
-}
+let firebase = null; // Firebase Auth SDK + auth, once loaded
 
 // Trade the Firebase sign-in for our own session cookie, then forget Firebase's
 // copy so this browser only holds one session.
@@ -119,7 +103,7 @@ async function startLogin() {
 
   let config;
   try {
-    config = await (await fetch('/api/auth/config')).json();
+    config = await FirebaseClient.config();
   } catch {
     showFailure("Couldn't reach the server. Check your connection and try again.");
     return;
@@ -129,8 +113,15 @@ async function startLogin() {
     return;
   }
 
+  const fine = document.querySelector('.login-fine');
+  if (fine) {
+    fine.textContent = config.cloudSync
+      ? 'Your tasks, habits and journal are saved to your account, so you can open them from any device.'
+      : 'Your tasks, habits and journal stay on this device. Signing in only unlocks the app.';
+  }
+
   try {
-    await loadFirebase(config.firebase);
+    firebase = await FirebaseClient.load();
   } catch (err) {
     console.error('Could not load Firebase:', err);
     showFailure("Couldn't load Google sign-in. Check your connection or any content blocker, then try again.");
