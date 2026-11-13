@@ -42,37 +42,45 @@ Data is stored locally in the browser (`localStorage`) — no database.
 
 ## Sign in with Google (optional)
 
-Set `GOOGLE_CLIENT_ID` **and** `SESSION_SECRET` and the app asks people to sign
-in with Google before it loads. With either one missing the app stays open,
-exactly as before, so a half-finished setup can never lock anyone out. Any
-Google account can sign in; your tasks, habits and journal still live in each
-person's own browser, and signing out does not erase them.
+Sign-in uses [Firebase Authentication](https://firebase.google.com/docs/auth),
+which looks after the Google OAuth client for you, so there is no Client ID to
+create by hand. Set `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY` **and**
+`SESSION_SECRET` and the app asks people to sign in with Google before it
+loads. With any of them missing the app stays open, exactly as before, so a
+half-finished setup can never lock anyone out. Any Google account can sign in;
+your tasks, habits and journal still live in each person's own browser, and
+signing out does not erase them.
 
 Put the settings in a `.env` file (copy `.env.example`; it is git-ignored and
 never served) or export them as environment variables. Real environment
 variables always win over `.env`, so hosted settings are never overridden.
 
 ```bash
-cp .env.example .env     # then fill in GOOGLE_CLIENT_ID and SESSION_SECRET
+cp .env.example .env     # then fill in the three values
 npm start
 ```
 
-1. In [Google Cloud Console](https://console.cloud.google.com/) go to **APIs &
-   Services → Credentials → Create credentials → OAuth client ID**, and choose
-   **Web application**.
-2. Under **Authorized JavaScript origins** add every address you use, for
-   example `http://localhost:1337` and your deployed URL. No redirect URIs are
-   needed.
-3. On the **OAuth consent screen**, choose *External* and publish the app. While
-   it is in *Testing*, only the test users you list can sign in.
-4. Set `GOOGLE_CLIENT_ID` and `SESSION_SECRET` (a long random string, at least 16
-   characters; without it sign-in stays off). On Azure these are app
-   settings instead of a `.env` file. Use a Client ID made for this app; Google
-   answers `Error 401: invalid_client` when the ID isn't a real, current one.
+1. In the [Firebase console](https://console.firebase.google.com/) create a
+   project for this app (or add Firebase to an existing Google Cloud project).
+2. **Build → Authentication → Get started → Sign-in method → Google → Enable**,
+   and pick a support email.
+3. **Authentication → Settings → Authorized domains**: add your deployed domain
+   (for example `applesonly.vercel.app`). `localhost` is already there.
+4. **Project settings (gear) → General → Your apps → Web app (`</>`)**: register
+   a web app. From its config copy `projectId` and `apiKey`. The API key is not
+   a secret; Firebase web keys are meant to be public.
+5. Set `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY` and `SESSION_SECRET` (a long
+   random string, at least 16 characters; without it sign-in stays off). On
+   Azure these are app settings instead of a `.env` file. Optionally set
+   `FIREBASE_AUTH_DOMAIN` if you don't use the default
+   `<projectId>.firebaseapp.com`.
 
-How it works: the server checks Google's ID token (signature, issuer, audience,
-expiry, verified email) and issues its own signed, HttpOnly session cookie that
-lasts 7 days. Nothing is stored on the server. Sign-in attempts are rate-limited.
+How it works: the browser signs in with Firebase's Google popup and sends the
+resulting ID token to the server. The server checks it (signature against
+Google's published keys, issuer, audience, expiry, issued-at, verified email,
+and that the method was Google) and issues its own signed, HttpOnly session
+cookie that lasts 7 days. Nothing is stored on the server. Sign-in attempts are
+rate-limited.
 
 ### On Vercel
 
@@ -81,18 +89,15 @@ Instead `middleware.js` (Vercel Routing Middleware, which runs before static
 files) guards the whole site, and `api/auth/` and `api/ai/` are Vercel
 Functions. They use the same code as the Node server (`gate.js`, `auth.js`).
 
-1. In the Vercel project settings, add `GOOGLE_CLIENT_ID` and `SESSION_SECRET`
-   for the **Production** environment only. The names must match exactly.
-   Generate the secret with
+1. In the Vercel project settings, add `FIREBASE_PROJECT_ID`,
+   `FIREBASE_API_KEY` and `SESSION_SECRET` for the **Production** environment
+   only. The names must match exactly. Generate the secret with
    `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
-   You do not need the Google *client secret*.
-2. In Google Cloud Console, add your production address (for example
-   `https://applesonly.vercel.app`) to **Authorized JavaScript origins**.
+2. Make sure your production domain is under Firebase's **Authorized domains**.
 3. Redeploy. Environment variables only apply to new deployments.
 
-Preview deployments stay open (and are already behind Vercel's own login):
-Google doesn't allow wildcard origins, so previews couldn't sign in anyway.
-To turn sign-in off again, remove `SESSION_SECRET` (or the client ID) and redeploy.
+Preview deployments stay open (and are already behind Vercel's own login).
+To turn sign-in off again, remove `SESSION_SECRET` and redeploy.
 
 ## AI helpers (currently turned off)
 
