@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
   money: 'lifeTracker.money',
   theme: 'lifeTracker.theme',
   background: 'lifeTracker.background',
+  taskFormMore: 'lifeTracker.taskFormMore',
 };
 
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
@@ -204,6 +205,8 @@ const ICON_PATHS = {
   'trending-up': '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
   sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M17 5h4"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  settings: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
   'chart-pie': '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>',
 };
 
@@ -216,6 +219,7 @@ const NAV = [
   { group: 'Daily', items: [['today', 'Today', 'sun'], ['tasks', 'Tasks', 'list-checks'], ['calendar', 'Calendar', 'calendar'], ['habits', 'Habits', 'flame'], ['journal', 'Journal', 'book-open']] },
   { group: 'Plan', items: [['goals', 'Goals', 'target'], ['projects', 'Projects', 'folder']] },
   { group: 'Insights', items: [['dashboard', 'Dashboard', 'layout-dashboard'], ['wheel', 'Life Wheel', 'hexagon'], ['money', 'Money', 'wallet']] },
+  { group: 'App', items: [['settings', 'Settings', 'settings']] },
 ];
 
 function showTab(tab) {
@@ -1654,6 +1658,37 @@ function addTask(fields) {
   return task;
 }
 
+// The extra task fields stay tucked away until asked for; the choice is remembered.
+const taskMoreBtn = document.getElementById('taskMoreBtn');
+const taskMoreOptions = document.getElementById('taskMoreOptions');
+
+// How many extra fields differ from their defaults, so a collapsed form still says so.
+function updateTaskMoreNote() {
+  const set = [
+    document.getElementById('taskDate').value,
+    document.getElementById('taskPriority').value !== 'medium',
+    document.getElementById('taskRepeat').value,
+    document.getElementById('taskGoal').value,
+    document.getElementById('taskProject').value,
+  ].filter(Boolean).length;
+  document.getElementById('taskMoreNote').textContent = set && taskMoreOptions.hidden ? `· ${set} set` : '';
+}
+
+function setTaskMore(open) {
+  taskMoreOptions.hidden = !open;
+  taskMoreBtn.setAttribute('aria-expanded', String(open));
+  document.getElementById('taskMoreLabel').textContent = open ? 'Fewer options' : 'More options';
+  updateTaskMoreNote();
+}
+
+taskMoreBtn.addEventListener('click', () => {
+  const open = taskMoreOptions.hidden;
+  setTaskMore(open);
+  save(STORAGE_KEYS.taskFormMore, open);
+});
+taskMoreOptions.addEventListener('change', updateTaskMoreNote);
+setTaskMore(load(STORAGE_KEYS.taskFormMore, false) === true);
+
 document.getElementById('taskForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = document.getElementById('taskInput');
@@ -1681,6 +1716,7 @@ document.getElementById('taskForm').addEventListener('submit', (e) => {
   prioritySel.value = 'medium';
   goalSel.value = '';
   projectSel.value = '';
+  updateTaskMoreNote();
 });
 
 document.getElementById('taskList').addEventListener('click', (e) => {
@@ -2881,6 +2917,12 @@ function renderDashboard() {
   const daysSince = daysSinceLastBackup();
   const stale = hasAnyData() && daysSince >= 7;
   backupCard.classList.toggle('stale', stale);
+  // The backup card lives on Settings, so flag the nav item when it needs a look.
+  const settingsBtn = document.querySelector('.tab-btn[data-tab="settings"]');
+  if (settingsBtn) {
+    settingsBtn.classList.toggle('needs-attention', stale);
+    settingsBtn.title = stale ? 'Settings: time for a backup' : '';
+  }
   if (!hasAnyData()) {
     backupStatus.textContent = 'No data yet.';
   } else if (daysSince === Infinity) {
@@ -3140,7 +3182,15 @@ function applyTheme(theme) {
     btn.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
     btn.innerHTML = icon(dark ? 'sun' : 'moon');
   }
+  const select = document.getElementById('themeSelect');
+  if (select) select.value = theme === 'light' || theme === 'dark' ? theme : 'system';
 }
+
+document.getElementById('themeSelect').addEventListener('change', (e) => {
+  const value = e.target.value === 'system' ? null : e.target.value;
+  applyTheme(value);
+  save(STORAGE_KEYS.theme, value);
+});
 
 document.getElementById('themeToggle').addEventListener('click', () => {
   const next = currentTheme() === 'dark' ? 'light' : 'dark';
@@ -3400,6 +3450,8 @@ function bannerFor(tab) {
       const avg = scores.reduce((sum, s) => sum + s.score, 0) / scores.length;
       return { title: 'Balance check', sub: `Average ${avg.toFixed(1)} out of 10 across ${scores.length} areas` };
     }
+    case 'settings':
+      return { title: 'Make it yours', sub: 'Appearance, calendar connections and backups' };
     case 'money':
       return {
         title: 'Your money',
@@ -3424,11 +3476,7 @@ const bgToggle = document.getElementById('bgToggle');
 function applyBackground(on) {
   if (on) delete document.documentElement.dataset.bg;
   else document.documentElement.dataset.bg = 'off';
-  const label = on ? 'Turn the animated background off' : 'Turn the animated background on';
-  bgToggle.setAttribute('aria-pressed', String(on));
-  bgToggle.setAttribute('aria-label', label);
-  bgToggle.title = label;
-  bgToggle.innerHTML = icon('sparkles');
+  bgToggle.setAttribute('aria-checked', String(on));
   if (window.AnimatedBackground) AnimatedBackground.setEnabled(on);
 }
 
@@ -3436,6 +3484,222 @@ bgToggle.addEventListener('click', () => {
   const on = document.documentElement.dataset.bg === 'off'; // flip
   applyBackground(on);
   save(STORAGE_KEYS.background, on ? 'on' : 'off');
+});
+
+// ---------- Search (Ctrl+K / Cmd+K) ----------
+// One box over everything: pick a result to jump to its page and item.
+const searchDialog = document.getElementById('searchDialog');
+const searchInput = document.getElementById('searchInput');
+const searchResults = document.getElementById('searchResults');
+let searchHits = [];
+let searchActive = 0;
+
+function searchIndex() {
+  const pages = NAV.flatMap((g) => g.items).map(([tab, label, ic]) => ({
+    kind: 'Pages', tab, icon: ic, title: label, meta: 'Go to page', text: label,
+  }));
+  return [
+    ...tasks.map((t) => ({
+      kind: 'Tasks', tab: 'tasks', id: t.id, icon: 'list-checks', title: t.title,
+      meta: [TASK_STATUS_LABELS[t.status], t.dueDate ? `due ${t.dueDate}` : ''].filter(Boolean).join(' · '),
+      text: t.title, done: t.status === 'done',
+    })),
+    ...habits.map((h) => ({
+      kind: 'Habits', tab: 'habits', id: h.id, icon: 'flame', title: h.name,
+      meta: describeFrequency(habitFrequency(h)), text: h.name,
+    })),
+    ...goals.map((g) => ({
+      kind: 'Goals', tab: 'goals', id: g.id, icon: 'target', title: g.title,
+      meta: `${goalProgress(g).pct}% complete${g.dueDate ? ` · due ${g.dueDate}` : ''}`, text: g.title,
+    })),
+    ...projects.map((p) => ({
+      kind: 'Projects', tab: 'projects', id: p.id, icon: 'folder', title: p.name, meta: 'Project', text: p.name,
+    })),
+    ...[...journal].sort((a, b) => b.createdAt - a.createdAt).map((j) => ({
+      kind: 'Journal', tab: 'journal', id: j.id, icon: 'book-open', title: j.text,
+      meta: [`${j.mood} ${new Date(j.createdAt).toLocaleDateString()}`, ...(j.tags || []).map((t) => `#${t}`)].join(' '),
+      text: `${j.text} ${(j.tags || []).join(' ')}`,
+    })),
+    ...pages,
+  ];
+}
+
+// Every word has to appear somewhere; open items rank above finished ones.
+function searchFind(query) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const hits = searchIndex().filter((item) => {
+    const hay = item.text.toLowerCase();
+    // Page names only match from the start of a word, so "r" doesn't list every page with an r in it.
+    if (item.kind === 'Pages') return words.every((w) => hay.split(/\s+/).some((part) => part.startsWith(w)));
+    return words.every((w) => hay.includes(w));
+  });
+  const order = ['Pages', 'Tasks', 'Habits', 'Goals', 'Projects', 'Journal'];
+  hits.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || Number(!!a.done) - Number(!!b.done));
+  // At most 6 of each kind, so one busy section can't push the rest out.
+  const seen = {};
+  return hits.filter((h) => (seen[h.kind] = (seen[h.kind] || 0) + 1) <= 6);
+}
+
+// Escape, then wrap matched words in <mark>; long journal text is cut around the first match.
+function searchHighlight(text, query) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  let str = String(text).replace(/\s+/g, ' ');
+  if (str.length > 90) {
+    const at = Math.max(0, str.toLowerCase().indexOf(words[0] || '') - 30);
+    str = (at > 0 ? '…' : '') + str.slice(at, at + 90) + (at + 90 < str.length ? '…' : '');
+  }
+  if (!words.length) return escapeHtml(str);
+  const re = new RegExp(`(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+  return str.split(re).map((part, i) => (i % 2 ? `<mark>${escapeHtml(part)}</mark>` : escapeHtml(part))).join('');
+}
+
+function renderSearch() {
+  const q = searchInput.value.trim();
+  searchHits = searchFind(q);
+  searchActive = 0;
+  if (!q) {
+    searchResults.innerHTML = '<li class="search-empty">Type to search everything you have added.</li>';
+    searchInput.removeAttribute('aria-activedescendant');
+    return;
+  }
+  if (!searchHits.length) {
+    searchResults.innerHTML = `<li class="search-empty">Nothing matches “${escapeHtml(q)}”.</li>`;
+    searchInput.removeAttribute('aria-activedescendant');
+    return;
+  }
+  let lastKind = '';
+  searchResults.innerHTML = searchHits
+    .map((h, i) => {
+      const head = h.kind !== lastKind ? `<li class="search-group" role="presentation">${h.kind}</li>` : '';
+      lastKind = h.kind;
+      return `${head}<li class="search-hit${h.done ? ' is-done' : ''}" role="option" id="search-hit-${i}" data-index="${i}">
+        ${icon(h.icon)}
+        <span class="search-hit-text"><span class="search-hit-title">${searchHighlight(h.title, q)}</span>
+        <span class="search-hit-meta">${escapeHtml(h.meta)}</span></span></li>`;
+    })
+    .join('');
+  setSearchActive(0);
+}
+
+function setSearchActive(i) {
+  if (!searchHits.length) return;
+  searchActive = (i + searchHits.length) % searchHits.length;
+  searchResults.querySelectorAll('.search-hit').forEach((el) => {
+    const on = Number(el.dataset.index) === searchActive;
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-selected', String(on));
+    if (on) el.scrollIntoView({ block: 'nearest' });
+  });
+  searchInput.setAttribute('aria-activedescendant', `search-hit-${searchActive}`);
+}
+
+function openSearch() {
+  if (searchDialog.open) return;
+  searchInput.value = '';
+  renderSearch();
+  searchDialog.showModal();
+  searchInput.focus();
+}
+
+function openSearchHit(hit) {
+  if (!hit) return;
+  searchDialog.close();
+  // A journal tag filter could be hiding the entry we're jumping to.
+  if (hit.tab === 'journal' && journalTagFilter) {
+    journalTagFilter = null;
+    renderJournal();
+  }
+  showTab(hit.tab);
+  if (!hit.id) return;
+  const el = document.querySelector(`#${hit.tab} .item-card[data-id="${CSS.escape(hit.id)}"]`);
+  if (!el) return;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.remove('search-flash');
+  void el.offsetWidth; // restart the animation if it's the same item again
+  el.classList.add('search-flash');
+  setTimeout(() => el.classList.remove('search-flash'), 1800);
+}
+
+document.getElementById('searchBtn').innerHTML = icon('search');
+document.getElementById('searchBtn').addEventListener('click', openSearch);
+searchInput.addEventListener('input', renderSearch);
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    setSearchActive(searchActive + (e.key === 'ArrowDown' ? 1 : -1));
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    openSearchHit(searchHits[searchActive]);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    searchDialog.close();
+  }
+});
+searchResults.addEventListener('click', (e) => {
+  const li = e.target.closest('.search-hit');
+  if (li) openSearchHit(searchHits[Number(li.dataset.index)]);
+});
+searchResults.addEventListener('mousemove', (e) => {
+  const li = e.target.closest('.search-hit');
+  if (li && Number(li.dataset.index) !== searchActive) setSearchActive(Number(li.dataset.index));
+});
+// A click on the dimmed backdrop (outside the box) closes it.
+searchDialog.addEventListener('click', (e) => {
+  if (e.target === searchDialog) searchDialog.close();
+});
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    if (searchDialog.open) searchDialog.close();
+    else openSearch();
+  }
+});
+
+// ---------- Install as an app ----------
+// The service worker keeps a copy of the app so it opens offline. Browsers only
+// allow one on https or localhost.
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  const registerWorker = () =>
+    navigator.serviceWorker.register('/sw.js').catch((err) => console.warn('Offline support unavailable:', err.message));
+  // sync.js loads this file late, often after 'load' has already fired.
+  if (document.readyState === 'complete') registerWorker();
+  else window.addEventListener('load', registerWorker);
+}
+
+const installCard = document.getElementById('installCard');
+const installBtn = document.getElementById('installBtn');
+const installHint = document.getElementById('installHint');
+let installPrompt = null;
+
+const runningInstalled =
+  (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+if (!runningInstalled && isIOS) {
+  // Safari on iPhone and iPad has no install button a page can trigger.
+  installHint.innerHTML = 'Tap the <strong>Share</strong> button in Safari, then <strong>Add to Home Screen</strong>. It opens full screen and works without a connection.';
+  installCard.hidden = false;
+}
+
+// Chrome, Edge and Android hand us a prompt we can show from our own button.
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  installBtn.hidden = false;
+  installCard.hidden = false;
+});
+
+installBtn.addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => null);
+  installPrompt = null;
+  installBtn.hidden = true;
+});
+
+window.addEventListener('appinstalled', () => {
+  installCard.hidden = true;
 });
 
 // ---------- Account (shown only when the server has Google sign-in on) ----------

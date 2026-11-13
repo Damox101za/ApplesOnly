@@ -14,7 +14,13 @@ const auth = require('./auth');
 
 // What a signed-out visitor may load while sign-in is on. The sign-in page and
 // everything it needs, nothing else.
-const PUBLIC_FILES = new Set(['/login.html', '/login.js', '/firebase-client.js', '/style.css', '/background.js', '/favicon.ico']);
+// The manifest and icons are included because browsers fetch the manifest
+// without cookies, so it has to load even for a signed-in visitor.
+const PUBLIC_FILES = new Set([
+  '/login.html', '/login.js', '/firebase-client.js', '/style.css', '/background.js', '/favicon.ico',
+  '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png',
+  '/icons/maskable-512.png', '/icons/apple-touch-icon.png',
+]);
 
 const NEXT = { action: 'next' };
 

@@ -2,9 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Life Tracker">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <title>Life Tracker</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%8D%8E%3C/text%3E%3C/svg%3E">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
   <script>try{var t=JSON.parse(localStorage.getItem('lifeTracker.theme'));if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;if(JSON.parse(localStorage.getItem('lifeTracker.background'))==='off')document.documentElement.dataset.bg='off';}catch(e){}</script>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -51,7 +58,7 @@
                 <button type="button" id="signOutBtn" class="secondary-btn">Sign out</button>
               </div>
             </div>
-            <button type="button" id="bgToggle" class="icon-btn" aria-pressed="true" aria-label="Turn the animated background off" title="Turn the animated background off"></button>
+            <button type="button" id="searchBtn" class="icon-btn" aria-label="Search (Ctrl+K)" title="Search (Ctrl+K)" aria-haspopup="dialog"></button>
             <button type="button" id="themeToggle" class="icon-btn" aria-label="Toggle theme"></button>
           </div>
         </header>
@@ -70,69 +77,50 @@
           </section>
 
           <section id="tasks" class="tab-panel">
-            <div class="card" id="googleCard">
-              <div class="google-header">
-                <div>
-                  <div class="card-title-plain">Google Calendar</div>
-                  <div class="google-status" id="googleStatus">Not connected.</div>
-                </div>
-                <div class="google-actions">
-                  <button type="button" id="googleConnectBtn">Connect</button>
-                  <button type="button" id="googleSyncBtn" class="secondary-btn" hidden>Sync now</button>
-                  <button type="button" id="googleDisconnectBtn" class="secondary-btn" hidden>Disconnect</button>
-                </div>
+            <form id="taskForm" class="task-form">
+              <div class="task-form-main">
+                <input type="text" id="taskInput" placeholder="New task, e.g. Renew passport" required>
+                <button type="submit">Add Task</button>
               </div>
-              <p class="google-hint">
-                Tasks with a due date can create matching events on your Google Calendar,
-                and events on your calendar can come in as tasks. Connecting opens a Google
-                window that asks for calendar access.
-              </p>
-            </div>
-
-            <div class="card" id="icsCard">
-              <div class="google-header">
-                <div>
-                  <div class="card-title-plain">Import / export calendar (.ics)</div>
-                  <div class="google-status">Works with any calendar app — Google, Apple, Outlook, or a forwarded invite.</div>
-                </div>
-                <div class="google-actions">
-                  <button type="button" id="icsExportBtn" class="secondary-btn">Export .ics</button>
-                  <label class="file-btn">
-                    Import .ics
-                    <input type="file" id="icsImportFile" accept=".ics,text/calendar">
-                  </label>
-                </div>
+              <button type="button" id="taskMoreBtn" class="link-btn" aria-expanded="false" aria-controls="taskMoreOptions">
+                <span id="taskMoreLabel">More options</span>
+                <span class="link-btn-note" id="taskMoreNote"></span>
+              </button>
+              <div class="form-grid task-more" id="taskMoreOptions" hidden>
+                <label class="field">
+                  <span>Due date</span>
+                  <input type="date" id="taskDate">
+                </label>
+                <label class="field">
+                  <span>Priority</span>
+                  <select id="taskPriority">
+                    <option value="high">High</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Repeat</span>
+                  <select id="taskRepeat">
+                    <option value="">Does not repeat</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Goal</span>
+                  <select id="taskGoal">
+                    <option value="">No goal</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Project</span>
+                  <select id="taskProject">
+                    <option value="">No project</option>
+                  </select>
+                </label>
               </div>
-              <div class="import-confirm" id="icsImportConfirm">
-                <p id="icsImportSummary"></p>
-                <div class="import-confirm-actions">
-                  <button type="button" id="icsImportCancelBtn" class="secondary-btn">Cancel</button>
-                  <button type="button" id="icsImportConfirmBtn">Add as tasks</button>
-                </div>
-              </div>
-            </div>
-
-            <form id="taskForm" class="inline-form form-grid">
-              <input type="text" id="taskInput" class="span-all" placeholder="New task, e.g. Renew passport" required>
-              <input type="date" id="taskDate" aria-label="Due date">
-              <select id="taskPriority" aria-label="Priority">
-                <option value="high">High priority</option>
-                <option value="medium" selected>Medium priority</option>
-                <option value="low">Low priority</option>
-              </select>
-              <select id="taskRepeat" aria-label="Repeat">
-                <option value="">Does not repeat</option>
-                <option value="daily">Repeats daily</option>
-                <option value="weekly">Repeats weekly</option>
-                <option value="monthly">Repeats monthly</option>
-              </select>
-              <select id="taskGoal" aria-label="Goal">
-                <option value="">No goal</option>
-              </select>
-              <select id="taskProject" aria-label="Project">
-                <option value="">No project</option>
-              </select>
-              <button type="submit">Add Task</button>
             </form>
 
             <div class="view-toggle" id="taskViewToggle" role="group" aria-label="Task view">
@@ -284,27 +272,6 @@
               </div>
             </section>
 
-            <div class="card backup-card" id="backupCard">
-              <div class="backup-info">
-                <div class="backup-title">Backup</div>
-                <div class="backup-status" id="backupStatus"></div>
-              </div>
-              <div class="backup-actions">
-                <button type="button" id="exportBtn">Export backup</button>
-                <label class="file-btn">
-                  Import backup
-                  <input type="file" id="importFile" accept="application/json">
-                </label>
-              </div>
-            </div>
-
-            <div class="import-confirm" id="importConfirm">
-              <p id="importSummary"></p>
-              <div class="import-confirm-actions">
-                <button type="button" id="importCancelBtn" class="secondary-btn">Cancel</button>
-                <button type="button" id="importConfirmBtn">Replace my data</button>
-              </div>
-            </div>
           </section>
 
           <section id="wheel" class="tab-panel">
@@ -372,10 +339,121 @@
               </details>
             </div>
           </section>
+          <section id="settings" class="tab-panel">
+            <h2 class="section-heading settings-heading">Appearance</h2>
+            <div class="card settings-card">
+              <div class="setting-row">
+                <div>
+                  <div class="card-title-plain">Theme</div>
+                  <div class="google-status">Follow your system, or pick one. The moon/sun button in the header switches it too.</div>
+                </div>
+                <select id="themeSelect" aria-label="Theme">
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <div class="card-title-plain" id="bgSwitchLabel">Animated background</div>
+                  <div class="google-status">The softly moving banner at the top of each page. It stays still if your system asks for reduced motion.</div>
+                </div>
+                <button type="button" id="bgToggle" class="switch" role="switch" aria-checked="true" aria-labelledby="bgSwitchLabel"><span class="switch-thumb"></span></button>
+              </div>
+            </div>
+
+            <div class="card settings-card" id="installCard" hidden>
+              <div class="setting-row">
+                <div>
+                  <div class="card-title-plain">Install the app</div>
+                  <div class="google-status" id="installHint">Add Life Tracker to your home screen or dock. It opens in its own window and works without a connection.</div>
+                </div>
+                <button type="button" id="installBtn" class="secondary-btn" hidden>Install</button>
+              </div>
+            </div>
+
+            <h2 class="section-heading settings-heading">Calendar</h2>
+            <div class="card" id="googleCard">
+              <div class="google-header">
+                <div>
+                  <div class="card-title-plain">Google Calendar</div>
+                  <div class="google-status" id="googleStatus">Not connected.</div>
+                </div>
+                <div class="google-actions">
+                  <button type="button" id="googleConnectBtn">Connect</button>
+                  <button type="button" id="googleSyncBtn" class="secondary-btn" hidden>Sync now</button>
+                  <button type="button" id="googleDisconnectBtn" class="secondary-btn" hidden>Disconnect</button>
+                </div>
+              </div>
+              <p class="google-hint">
+                Tasks with a due date can create matching events on your Google Calendar,
+                and events on your calendar can come in as tasks. Connecting opens a Google
+                window that asks for calendar access.
+              </p>
+            </div>
+
+            <div class="card" id="icsCard">
+              <div class="google-header">
+                <div>
+                  <div class="card-title-plain">Import / export calendar (.ics)</div>
+                  <div class="google-status">Works with any calendar app — Google, Apple, Outlook, or a forwarded invite.</div>
+                </div>
+                <div class="google-actions">
+                  <button type="button" id="icsExportBtn" class="secondary-btn">Export .ics</button>
+                  <label class="file-btn">
+                    Import .ics
+                    <input type="file" id="icsImportFile" accept=".ics,text/calendar">
+                  </label>
+                </div>
+              </div>
+              <div class="import-confirm" id="icsImportConfirm">
+                <p id="icsImportSummary"></p>
+                <div class="import-confirm-actions">
+                  <button type="button" id="icsImportCancelBtn" class="secondary-btn">Cancel</button>
+                  <button type="button" id="icsImportConfirmBtn">Add as tasks</button>
+                </div>
+              </div>
+            </div>
+
+
+            <h2 class="section-heading settings-heading">Your data</h2>
+            <div class="card backup-card" id="backupCard">
+              <div class="backup-info">
+                <div class="backup-title">Backup</div>
+                <div class="backup-status" id="backupStatus"></div>
+              </div>
+              <div class="backup-actions">
+                <button type="button" id="exportBtn">Export backup</button>
+                <label class="file-btn">
+                  Import backup
+                  <input type="file" id="importFile" accept="application/json">
+                </label>
+              </div>
+            </div>
+
+            <div class="import-confirm" id="importConfirm">
+              <p id="importSummary"></p>
+              <div class="import-confirm-actions">
+                <button type="button" id="importCancelBtn" class="secondary-btn">Cancel</button>
+                <button type="button" id="importConfirmBtn">Replace my data</button>
+              </div>
+            </div>
+          </section>
         </main>
       </div>
     </div>
   </div>
+
+  <dialog class="search-dialog" id="searchDialog" aria-label="Search">
+    <div class="search-box">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input type="text" id="searchInput" enterkeyhint="go" placeholder="Search tasks, habits, journal, goals, projects…" autocomplete="off" spellcheck="false"
+        role="combobox" aria-expanded="true" aria-controls="searchResults" aria-autocomplete="list" aria-label="Search">
+      <kbd class="search-esc">Esc</kbd>
+    </div>
+    <ul class="search-results" id="searchResults" role="listbox" aria-label="Results"></ul>
+    <div class="search-foot" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span></div>
+  </dialog>
 
   <div class="toast" id="toast">
     <span class="toast-message"></span>

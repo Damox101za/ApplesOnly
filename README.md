@@ -12,10 +12,15 @@ served by a small dependency-free Node.js server.
   `pay rent every month !high #goal @project` into a task. It understands
   dates (`tomorrow`, `next friday`, `dec 25`), repeats, priority, a goal
   (`#name`) and a project (`@name`), with a live preview.
+- **Search** — press `Ctrl+K` (`⌘K` on a Mac) or the magnifier in the header
+  to search tasks, habits, goals, projects, journal entries and tags, and to
+  jump to any page. Picking a result opens its page and highlights the item.
 - **Tasks** — list and kanban-board views, due dates, priority, daily / weekly /
   monthly repeats, and links to a goal and a project. Import/export `.ics`
-  files, and optionally sync two-way with Google Calendar (the Connect button on the Tasks
-  tab; it uses the same Firebase sign-in, so there is nothing extra to set up).
+  files, and optionally sync two-way with Google Calendar (the Connect button on the Settings
+  page; it uses the same Firebase sign-in, so there is nothing extra to set up).
+  Adding a task on the Tasks tab needs only a title; due date, priority,
+  repeat, goal and project sit under **More options**.
 - **Habits** — daily, weekdays, weekends, specific days, or once a week. Streaks
   respect the schedule, so off days never break them.
 - **Journal** — entries with a mood and tags, with a tag filter.
@@ -29,12 +34,20 @@ served by a small dependency-free Node.js server.
   calculator, and short budgeting guides.
 - **Dashboard** — stats, a task-status breakdown, streak cards and a
   GitHub-style activity heatmap.
-- **Backup** — export/import all data as JSON, with undo on deletes and
+- **Settings** — one place for theme, the animated background, Google
+  Calendar, `.ics` import/export and backups. A dot on the Settings nav item
+  means it has been a week since your last backup.
+- **Backup** — export/import all data as JSON (on the Settings page), with undo on deletes and
   automatic schema migrations.
+- **Install as an app** — on a phone or computer, add it to your home screen
+  or dock (Settings → Install the app, or Share → Add to Home Screen on an
+  iPhone). It opens in its own window and still works with no connection;
+  changes sync when you are back online. Offline support needs https (or
+  localhost), which Vercel and Azure both provide.
 - **Light and dark themes** — follows your system, or use the toggle in the
   header.
 - **Animated background** — a soft, slowly moving banner at the top of every page
-  and on the sign-in screen. Turn it off with the sparkle button in the header
+  and on the sign-in screen. Turn it off on the Settings page
   (your choice is remembered). It stays still if your system asks for reduced
   motion.
 
