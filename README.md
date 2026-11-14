@@ -35,6 +35,24 @@ served by a small dependency-free Node.js server.
   savings, date) and each part shows how much is left or how far over you are,
   month by month. Plus a sinking-fund calculator and short budgeting guides.
   Spending syncs, is encrypted, and is part of backups like everything else.
+- **Spending sums** — the month's list is grouped by day with a total for
+  each day (and the time, when there is one); **Where it went** adds up the
+  month by place, merging the different ways a bank names the same shop
+  ("POS PURCHASE CHECKERS HYPER, CAPE TOWN" and "Checkers Hyper"); and
+  **Spending over time** charts the last 6 or 12 months, stacked by needs,
+  wants and savings against your income (hover for the sums, click a month
+  to open it, or show it as a table).
+- **Import spending from CSV or Excel** — a bank statement export or your own
+  spreadsheet (`.csv` or `.xlsx`). The file doesn't need to be tidy: the
+  header row is found below any account details, columns can be in any order
+  (date, description, one amount column or separate money out / money in,
+  an optional category), and dates and amounts are read in the common
+  formats (`13/11/2026`, `13 Nov 2026`, `R1 234,56`, `(250.00)`, `250 DR`...).
+  Money coming in is left out, rows you've already logged are spotted, and
+  each entry is sorted into needs, wants or savings from its description.
+  A preview lets you change any column or category before anything is added,
+  and Undo takes a whole import back out. The file is read in your browser
+  and never uploaded. Old `.xls` files need saving as `.xlsx` or CSV first.
 - **Dashboard** — stats, a task-status breakdown, streak cards and a
   GitHub-style activity heatmap.
 - **Settings** — one place for theme, the animated background, Google

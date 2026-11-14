@@ -273,6 +273,107 @@ test('spending: logged against the 50/30/20 budget, month by month', async (t) =
   assert.deepEqual(problems, []);
 });
 
+test('spending sums: by day, by place and month by month', async (t) => {
+  const { page, problems } = await openApp(t);
+  await page.evaluate(() => {
+    const now = monthKey(new Date());
+    const last = shiftMonth(now, -1);
+    const e = (id, month, day, amount, note, category, time = null) => ({ id, amount, note, category, date: `${month}-${day}`, time, createdAt: 1 });
+    localStorage.setItem('lifeTracker.money', JSON.stringify({ income: 10000, currency: 'R' }));
+    localStorage.setItem('lifeTracker.expenses', JSON.stringify([
+      e('a', now, '03', 860.5, 'POS PURCHASE CHECKERS HYPER, CAPE TOWN', 'needs', '17:42'),
+      e('b', now, '03', 120, 'UBER EATS', 'wants', '19:05'),
+      e('c', now, '05', 540, 'CHECKERS HYPER', 'needs'),
+      e('d', last, '10', 3000, 'Rent', 'needs'),
+      e('e', last, '12', 500, 'Savings', 'savings'),
+    ]));
+  });
+  await page.reload();
+  await page.waitForFunction(() => typeof parseQuickAdd === 'function' && document.querySelector('.tab-btn'));
+  await page.click('.tab-btn[data-tab="money"]');
+
+  // Grouped by day, with each day's total; times shown.
+  const days = await page.locator('#expenseList .expense-day').allTextContents();
+  assert.equal(days.length, 2);
+  assert.match(days[1].replace(/\s+/g, ' '), /R980\.50 · 2 entries/);
+  assert.match(await page.locator('#expenseList').textContent(), /19:05/);
+
+  // Where it went: two different descriptions of the same shop become one place.
+  const places = await page.locator('#spendPlaces .place-row').allTextContents();
+  assert.match(places[0].replace(/\s+/g, ' '), /Checkers Hyper R1,400\.50 2 times · 92% of the month/);
+
+  // Over time: one column per month, hover shows the sums, a click opens that month.
+  assert.equal(await page.locator('.trend-hit').count(), 6);
+  await page.locator('.trend-hit').nth(4).hover();
+  assert.match((await page.textContent('#spendTrendTip')).replace(/\s+/g, ' '), /Needs ?R3,000.*Savings & debt ?R500.*Total ?R3,500.*R6,500 left of income/);
+  await page.locator('.trend-hit').nth(4).click();
+  assert.equal(await page.textContent('#spendMonthLabel'), await page.evaluate(() => monthLabel(shiftMonth(monthKey(new Date()), -1))));
+  await page.click('.trend-range [data-months="12"]');
+  assert.equal(await page.locator('.trend-hit').count(), 12);
+  assert.equal(await page.locator('#spendTrendTable tbody tr').count(), 12, 'the same numbers as a table');
+
+  // A time typed in by hand is kept.
+  await page.click('#spendNext');
+  await page.fill('#expenseAmount', '45');
+  await page.fill('#expenseNote', 'Coffee');
+  await page.fill('#expenseTime', '08:30');
+  await page.click('#expenseForm button[type="submit"]');
+  const coffee = await page.evaluate(() => JSON.parse(localStorage.getItem('lifeTracker.expenses')).find((x) => x.note === 'Coffee'));
+  assert.equal(coffee.time, '08:30');
+
+  assert.deepEqual(problems, []);
+});
+
+test('spending import: messy bank CSV and Excel, with fixes in the preview', async (t) => {
+  const path = require('path');
+  const fixtures = path.join(__dirname, '..', 'fixtures');
+  const { page, problems } = await openApp(t);
+  await page.click('.tab-btn[data-tab="money"]');
+
+  await page.setInputFiles('#spendImportFile', path.join(fixtures, 'bank-statement.csv'));
+  await page.waitForSelector('#spendImportDialog[open]');
+  assert.match(await page.textContent('#spendImportFileName'), /9 rows · skipped 3 lines above the table/);
+  assert.match(await page.textContent('#spendImportSummary'), /8 to add, \$6,960\.24\. Left out: 1 money in\./);
+  assert.equal(await page.locator('#spendImportRows select.guessed').count(), 1, 'the one it could not sort is marked');
+
+  // Fix the guess, leave one row out, and add.
+  const rows = page.locator('#spendImportRows tr');
+  await rows.nth(0).locator('select').selectOption('wants');
+  await rows.nth(1).locator('input[type="checkbox"]').uncheck();
+  assert.equal(await page.textContent('#spendImportGo'), 'Add 7 entries');
+  await page.click('#spendImportGo');
+  assert.equal(await page.isVisible('#spendImportDialog'), false);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('lifeTracker.expenses')));
+  assert.equal(saved.length, 7);
+  assert.equal(saved.find((e) => e.note === 'SOMETHING UNUSUAL').category, 'wants');
+  assert.ok(!saved.some((e) => e.note === 'ENGEN GARAGE N1'), 'the unticked row stayed out');
+
+  // The same file again: everything already there is left unticked.
+  await page.setInputFiles('#spendImportFile', path.join(fixtures, 'bank-statement.csv'));
+  await page.waitForSelector('#spendImportDialog[open]');
+  assert.match(await page.textContent('#spendImportSummary'), /^1 to add/, 'only the row left out last time');
+  assert.match(await page.textContent('#spendImportSummary'), /7 already logged/);
+
+  // Point "Description" at another column: the preview follows.
+  await page.click('#spendImportMap summary');
+  await page.selectOption('#mapDescription', '2'); // the Balance column
+  assert.match(await page.locator('#spendImportRows tr').first().textContent(), /6039\.76/);
+  await page.click('#spendImportCancel');
+
+  // Excel, read entirely in the browser under the Content Security Policy.
+  await page.setInputFiles('#spendImportFile', path.join(fixtures, 'budget.xlsx'));
+  await page.waitForSelector('#spendImportDialog[open]');
+  assert.match(await page.textContent('#spendImportSummary'), /^4 to add/);
+  await page.click('#spendImportGo');
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('lifeTracker.expenses')).length), 11);
+
+  // Undo takes the whole import back out.
+  await page.click('.toast-undo');
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('lifeTracker.expenses')).length), 7);
+
+  assert.deepEqual(problems, []);
+});
+
 test('click-through: add, search, every page, no CSP violations or errors', async (t) => {
   const { page, problems } = await openApp(t);
 
